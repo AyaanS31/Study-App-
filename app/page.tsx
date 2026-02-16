@@ -1,152 +1,233 @@
-import type { Metadata } from "next";
+"use client";
 
-export const metadata: Metadata = {
-  title: "StudentSuccess | Study Smarter. Achieve More.",
-  description:
-    "An all-in-one academic platform for high school students to study smarter, track progress, plan college, and find scholarships.",
-};
+import { motion, useScroll, useTransform } from "framer-motion";
+import { useRef } from "react";
 
 export default function Home() {
+  const containerRef = useRef(null);
+  const { scrollYProgress } = useScroll({
+    target: containerRef,
+    offset: ["start start", "end end"],
+  });
+
+  const scale = useTransform(scrollYProgress, [0, 1], [1, 1.2]);
+  const opacity = useTransform(scrollYProgress, [0, 0.3], [1, 0]);
+
   return (
-    <main className="bg-white text-gray-800">
-      
-      {/* NAVBAR */}
-      <nav className="flex justify-between items-center px-8 py-6 max-w-7xl mx-auto">
-        <h1 className="text-2xl font-bold text-blue-600">StudentSuccess</h1>
-        <div className="space-x-6 hidden md:block">
-          <a href="#features" className="hover:text-blue-600 transition">Features</a>
-          <a href="#pricing" className="hover:text-blue-600 transition">Pricing</a>
-          <a href="/login" className="hover:text-blue-600 transition">Login</a>
-          <a
-            href="/signup"
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
-          >
-            Get Started
-          </a>
-        </div>
-      </nav>
+    <main
+      ref={containerRef}
+      className="bg-black text-white overflow-x-hidden"
+    >
 
       {/* HERO SECTION */}
-      <section className="text-center py-24 px-6 bg-gradient-to-r from-blue-50 to-purple-50">
-        <h2 className="text-4xl md:text-6xl font-bold mb-6 leading-tight">
-          All Your Academic Success <br />
-          <span className="text-blue-600">In One Place</span>
-        </h2>
+      <section className="h-screen flex flex-col justify-center items-center text-center px-6 relative">
 
-        <p className="text-lg md:text-xl max-w-2xl mx-auto mb-8 text-gray-600">
-          Study smarter, track your goals, plan college, and discover
-          scholarships — everything built for high school students.
-        </p>
+        <motion.div
+          style={{ scale, opacity }}
+          className="absolute inset-0 bg-gradient-to-br from-blue-900/30 via-black to-violet-900/30"
+        />
 
-        <div className="space-x-4">
-          <a
-            href="/signup"
-            className="bg-blue-600 text-white px-8 py-3 rounded-xl text-lg hover:bg-blue-700 transition"
-          >
-            Start Free
-          </a>
-          <a
-            href="#features"
-            className="border border-gray-300 px-8 py-3 rounded-xl text-lg hover:bg-gray-100 transition"
-          >
-            Learn More
-          </a>
-        </div>
-      </section>
-
-      {/* FEATURES SECTION */}
-      <section id="features" className="py-20 px-6 max-w-6xl mx-auto">
-        <h3 className="text-3xl font-bold text-center mb-12">
-          Powerful Tools for Students
-        </h3>
-
-        <div className="grid md:grid-cols-3 gap-10">
-          <FeatureCard
-            title="Flashcard Converter"
-            description="Turn your notes into smart flashcards instantly using AI-powered tools."
-          />
-          <FeatureCard
-            title="Time Management"
-            description="Pomodoro timers, to-do lists, and smart scheduling to stay organized."
-          />
-          <FeatureCard
-            title="College Planner"
-            description="Track GPA, extracurriculars, and see what you need for your dream schools."
-          />
-        </div>
-      </section>
-
-      {/* PRICING SECTION */}
-      <section id="pricing" className="bg-gray-50 py-20 px-6">
-        <h3 className="text-3xl font-bold text-center mb-12">
-          Simple Pricing
-        </h3>
-
-        <div className="grid md:grid-cols-2 gap-10 max-w-4xl mx-auto">
-          
-          {/* FREE */}
-          <div className="bg-white p-10 rounded-2xl shadow-md border">
-            <h4 className="text-xl font-semibold mb-4">Free</h4>
-            <p className="text-4xl font-bold mb-6">$0</p>
-            <ul className="space-y-3 text-gray-600 mb-8">
-              <li>✔ Basic Study Tools</li>
-              <li>✔ GPA Tracking</li>
-              <li>✔ Limited College Planner</li>
-            </ul>
-            <a
-              href="/signup"
-              className="block text-center bg-gray-200 py-3 rounded-lg hover:bg-gray-300 transition"
-            >
-              Get Started
-            </a>
-          </div>
-
-          {/* PREMIUM */}
-          <div className="bg-blue-600 text-white p-10 rounded-2xl shadow-xl">
-            <h4 className="text-xl font-semibold mb-4">Premium</h4>
-            <p className="text-4xl font-bold mb-6">$9/mo</p>
-            <ul className="space-y-3 mb-8">
-              <li>✔ Daily Internship Opportunities</li>
-              <li>✔ Advanced College Insights</li>
-              <li>✔ Scholarship Database</li>
-              <li>✔ Mentor Guidance Resources</li>
-            </ul>
-            <a
-              href="/signup"
-              className="block text-center bg-white text-blue-600 py-3 rounded-lg font-semibold hover:bg-gray-100 transition"
-            >
-              Upgrade Now
-            </a>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="text-center py-20 px-6">
-        <h3 className="text-3xl font-bold mb-6">
-          Ready to Take Control of Your Future?
-        </h3>
-        <a
-          href="/signup"
-          className="bg-blue-600 text-white px-10 py-4 rounded-xl text-lg hover:bg-blue-700 transition"
+        <motion.h1
+          initial={{ opacity: 0, y: 60 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1 }}
+          className="text-6xl md:text-8xl font-extrabold leading-tight z-10"
         >
-          Create Your Free Account
-        </a>
+          The Future of <br />
+          <span className="bg-gradient-to-r from-blue-400 to-violet-500 bg-clip-text text-transparent">
+            Student Success
+          </span>
+        </motion.h1>
+
+        <motion.p
+          initial={{ opacity: 0, y: 40 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5, duration: 1 }}
+          className="text-xl md:text-2xl text-gray-400 mt-8 max-w-3xl z-10"
+        >
+          A powerful academic operating system designed to help high school
+          students master productivity, college readiness, and opportunity discovery.
+        </motion.p>
+
       </section>
 
-      {/* FOOTER */}
-      <footer className="bg-gray-900 text-gray-400 py-10 text-center">
-        <p>© {new Date().getFullYear()} StudentSuccess. All rights reserved.</p>
-      </footer>
+      {/* IMMERSIVE SCROLL SECTION */}
+      <ScrollSection
+        title="Turn Notes Into Intelligence"
+        description="Capture your notes. Transform them into AI-powered flashcards instantly."
+      />
+
+      <ScrollSection
+        title="Own Your Time"
+        description="Smart productivity tools built for deep focus and measurable progress."
+      />
+
+      <ScrollSection
+        title="Engineer Your College Path"
+        description="Track GPA. Analyze requirements. Visualize what your dream schools demand."
+      />
+
+      {/* BIG FEATURE BREAK */}
+      <section className="min-h-screen flex flex-col justify-center items-center px-6 text-center bg-gradient-to-b from-black to-[#0b0f2a]">
+
+        <motion.h2
+          initial={{ opacity: 0, y: 80 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1 }}
+          viewport={{ once: true }}
+          className="text-5xl md:text-7xl font-bold leading-tight"
+        >
+          Built For <br />
+          <span className="bg-gradient-to-r from-blue-400 to-violet-500 bg-clip-text text-transparent">
+            Ambition
+          </span>
+        </motion.h2>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          transition={{ delay: 0.4, duration: 1 }}
+          className="mt-12 grid md:grid-cols-3 gap-12 max-w-6xl"
+        >
+          <Feature
+            title="Internship Intelligence"
+            description="Curated opportunity feeds delivered daily."
+          />
+          <Feature
+            title="Scholarship Engine"
+            description="Advanced database with filtering and tracking."
+          />
+          <Feature
+            title="Mentor Network"
+            description="Guided research and curated mentorship pathways."
+          />
+        </motion.div>
+      </section>
+
+      {/* PRICING DRAMATIC SECTION */}
+      <section className="min-h-screen flex flex-col justify-center items-center px-6 bg-black text-center">
+
+        <motion.h2
+          initial={{ opacity: 0, y: 60 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1 }}
+          viewport={{ once: true }}
+          className="text-5xl md:text-7xl font-bold mb-16"
+        >
+          Choose Your Level
+        </motion.h2>
+
+        <div className="grid md:grid-cols-2 gap-16 max-w-5xl">
+
+          <PricingCard
+            title="Free"
+            price="$0"
+            features={[
+              "Study Tools",
+              "Basic College Planner",
+              "GPA Tracking"
+            ]}
+          />
+
+          <PricingCard
+            title="Premium"
+            price="$9/mo"
+            features={[
+              "Internship Alerts",
+              "Scholarship Engine",
+              "Advanced Analytics",
+              "Mentor Network"
+            ]}
+            highlight
+          />
+
+        </div>
+      </section>
+
+      {/* FINAL CTA */}
+      <section className="h-screen flex flex-col justify-center items-center text-center px-6 bg-gradient-to-t from-black to-[#140f2a]">
+        <motion.h2
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          transition={{ duration: 1 }}
+          viewport={{ once: true }}
+          className="text-6xl md:text-8xl font-extrabold leading-tight"
+        >
+          Start Building <br />
+          Your Advantage.
+        </motion.h2>
+
+        <motion.a
+          href="/signup"
+          whileHover={{ scale: 1.1 }}
+          className="mt-12 bg-gradient-to-r from-blue-500 to-violet-600 px-14 py-6 rounded-2xl text-xl font-semibold"
+        >
+          Get Started
+        </motion.a>
+      </section>
+
     </main>
   );
 }
 
-function FeatureCard({ title, description }: { title: string; description: string }) {
+/* SCROLL SECTION */
+function ScrollSection({ title, description }: any) {
   return (
-    <div className="p-8 rounded-2xl border hover:shadow-lg transition">
-      <h4 className="text-xl font-semibold mb-4">{title}</h4>
-      <p className="text-gray-600">{description}</p>
-    </div>
+    <section className="min-h-screen flex flex-col justify-center items-center px-6 text-center bg-black">
+      <motion.h2
+        initial={{ opacity: 0, y: 80 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        transition={{ duration: 1 }}
+        viewport={{ once: true }}
+        className="text-5xl md:text-7xl font-bold leading-tight"
+      >
+        {title}
+      </motion.h2>
+
+      <motion.p
+        initial={{ opacity: 0 }}
+        whileInView={{ opacity: 1 }}
+        transition={{ delay: 0.4, duration: 1 }}
+        viewport={{ once: true }}
+        className="text-xl text-gray-400 mt-8 max-w-3xl"
+      >
+        {description}
+      </motion.p>
+    </section>
+  );
+}
+
+/* FEATURE CARD */
+function Feature({ title, description }: any) {
+  return (
+    <motion.div
+      whileHover={{ scale: 1.05 }}
+      className="p-8 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-md"
+    >
+      <h3 className="text-2xl font-semibold mb-4">{title}</h3>
+      <p className="text-gray-400">{description}</p>
+    </motion.div>
+  );
+}
+
+/* PRICING CARD */
+function PricingCard({ title, price, features, highlight }: any) {
+  return (
+    <motion.div
+      whileHover={{ scale: 1.05 }}
+      className={`p-12 rounded-3xl border ${
+        highlight
+          ? "border-blue-500 bg-gradient-to-br from-blue-900/20 to-violet-900/20"
+          : "border-white/10 bg-white/5"
+      }`}
+    >
+      <h3 className="text-3xl font-semibold mb-4">{title}</h3>
+      <p className="text-5xl font-bold mb-8">{price}</p>
+      <ul className="space-y-3 text-gray-400">
+        {features.map((f: string, i: number) => (
+          <li key={i}>✔ {f}</li>
+        ))}
+      </ul>
+    </motion.div>
   );
 }
