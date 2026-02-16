@@ -5,6 +5,7 @@ import { useRef } from "react";
 
 export default function Home() {
   const containerRef = useRef(null);
+
   const { scrollYProgress } = useScroll({
     target: containerRef,
     offset: ["start start", "end end"],
@@ -19,8 +20,42 @@ export default function Home() {
       className="bg-black text-white overflow-x-hidden"
     >
 
+      {/* NAVBAR */}
+      <nav className="fixed top-0 left-0 w-full z-50 bg-black/60 backdrop-blur-lg border-b border-white/10">
+        <div className="flex justify-between items-center px-8 py-6 max-w-7xl mx-auto">
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-violet-500 bg-clip-text text-transparent">
+            StudentSuccess
+          </h1>
+
+          <div className="space-x-6 hidden md:block">
+            <a href="#features" className="hover:text-blue-400 transition">
+              Features
+            </a>
+
+            <a href="#pricing" className="hover:text-blue-400 transition">
+              Pricing
+            </a>
+
+            <a href="/login" className="hover:text-blue-400 transition">
+              Login
+            </a>
+
+            <a
+              href="/signup"
+              className="bg-gradient-to-r from-blue-500 to-violet-600 px-5 py-2 rounded-xl hover:opacity-90 transition"
+            >
+              Get Started
+            </a>
+
+            <a href="/contact" className="hover:text-blue-400 transition">
+              Contact
+            </a>
+          </div>
+        </div>
+      </nav>
+
       {/* HERO SECTION */}
-      <section className="h-screen flex flex-col justify-center items-center text-center px-6 relative">
+      <section className="h-screen flex flex-col justify-center items-center text-center px-6 relative pt-24">
 
         <motion.div
           style={{ scale, opacity }}
@@ -48,11 +83,11 @@ export default function Home() {
           A powerful academic operating system designed to help high school
           students master productivity, college readiness, and opportunity discovery.
         </motion.p>
-
       </section>
 
       {/* IMMERSIVE SCROLL SECTION */}
       <ScrollSection
+        id="features"
         title="Turn Notes Into Intelligence"
         description="Capture your notes. Transform them into AI-powered flashcards instantly."
       />
@@ -104,8 +139,11 @@ export default function Home() {
         </motion.div>
       </section>
 
-      {/* PRICING DRAMATIC SECTION */}
-      <section className="min-h-screen flex flex-col justify-center items-center px-6 bg-black text-center">
+      {/* PRICING SECTION */}
+      <section
+        id="pricing"
+        className="min-h-screen flex flex-col justify-center items-center px-6 bg-black text-center"
+      >
 
         <motion.h2
           initial={{ opacity: 0, y: 60 }}
@@ -171,9 +209,12 @@ export default function Home() {
 }
 
 /* SCROLL SECTION */
-function ScrollSection({ title, description }: any) {
+function ScrollSection({ id, title, description }: any) {
   return (
-    <section className="min-h-screen flex flex-col justify-center items-center px-6 text-center bg-black">
+    <section
+      id={id}
+      className="min-h-screen flex flex-col justify-center items-center px-6 text-center bg-black"
+    >
       <motion.h2
         initial={{ opacity: 0, y: 80 }}
         whileInView={{ opacity: 1, y: 0 }}
