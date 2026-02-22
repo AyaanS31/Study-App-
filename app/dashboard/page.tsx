@@ -2,6 +2,9 @@
 
 import { useState, useEffect, ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useUser } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
@@ -11,6 +14,18 @@ interface Task {
   done: boolean;
   priority: "high" | "medium" | "low";
   due: string;
+}
+
+interface Profile {
+  id: string;
+  name: string;
+  school: string;
+  grade: string;
+  gpa: string;
+  sat: string;
+  dream_schools: string[];
+  interests: string[];
+  onboarded: boolean;
 }
 
 interface StyleMap {
@@ -66,9 +81,17 @@ const NOTES = [
   { title: "Calc BC – Integration", subject: "Math", updated: "3d ago", cards: 18 },
 ];
 
-// ─── MAIN ────────────────────────────────────────────────────────────────────
+// ─── SINGLE EXPORT DEFAULT ───────────────────────────────────────────────────
 
 export default function Dashboard() {
+  const { user, isLoaded } = useUser();
+  const router = useRouter();
+
+  // Auth + profile state
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // Dashboard state
   const [activeTab, setActiveTab] = useState("home");
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [pomodoroMin, setPomodoroMin] = useState(25);
@@ -76,9 +99,32 @@ export default function Dashboard() {
   const [pomodoroRunning, setPomodoroRunning] = useState(false);
   const [pomodoroMode, setPomodoroMode] = useState<"focus" | "break">("focus");
   const [newTask, setNewTask] = useState("");
-  const [gpa, setGpa] = useState("3.92");
-  const [sat, setSat] = useState("1490");
 
+  // ── Step 1: Check auth + load profile from Supabase ──
+  useEffect(() => {
+    async function loadProfile() {
+      if (!isLoaded) return;
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+      const { data } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+
+      if (!data || !data.onboarded) {
+        router.push("/onboarding");
+        return;
+      }
+      setProfile(data);
+      setAuthLoading(false);
+    }
+    loadProfile();
+  }, [user, isLoaded, router]);
+
+  // ── Step 2: Pomodoro timer ──
   useEffect(() => {
     if (!pomodoroRunning) return;
     const interval = setInterval(() => {
@@ -115,6 +161,22 @@ export default function Dashboard() {
   const completedTasks = tasks.filter((t) => t.done).length;
   const progress = Math.round((completedTasks / tasks.length) * 100);
 
+  // ── Loading screen while auth is checked ──
+  if (authLoading) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0A0A0F", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ fontSize: 40, marginBottom: 20 }}>◈</motion.div>
+        <div style={{ fontSize: 16, color: "rgba(255,255,255,0.4)" }}>Loading your dashboard...</div>
+      </div>
+    );
+  }
+
+  // Use real profile data from Supabase
+  const displayName = profile?.name || "Student";
+  const displayGpa = profile?.gpa || "—";
+  const displaySat = profile?.sat || "—";
+
+  // ── Main dashboard UI ──
   return (
     <div style={s.root}>
       {/* SIDEBAR */}
@@ -123,7 +185,6 @@ export default function Dashboard() {
           <span style={{ fontSize: 22, color: "#FF6B6B" }}>◈</span>
           <span style={s.sidebarLogoText}>Apex</span>
         </div>
-
         <nav style={{ flex: 1, padding: "16px 0" }}>
           {SIDEBAR_ITEMS.map((item) => (
             <motion.button
@@ -143,12 +204,11 @@ export default function Dashboard() {
             </motion.button>
           ))}
         </nav>
-
         <div style={s.sidebarProfile}>
-          <div style={s.avatar}>J</div>
+          <div style={s.avatar}>{displayName.charAt(0).toUpperCase()}</div>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>Jordan Lee</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Class of 2026</div>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>{displayName}</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{profile?.grade || "Student"}</div>
           </div>
         </div>
       </motion.aside>
@@ -166,20 +226,29 @@ export default function Dashboard() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <div style={s.streakBadge}>🔥 7 day streak</div>
-            <div style={s.avatarSm}>J</div>
+            <div style={s.avatarSm}>{displayName.charAt(0).toUpperCase()}</div>
           </div>
         </motion.div>
 
         <div style={{ padding: "32px", flex: 1 }}>
           <AnimatePresence mode="wait">
             <motion.div key={activeTab} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }}>
-              {activeTab === "home" && <HomeTab tasks={tasks} toggleTask={toggleTask} progress={progress} completedTasks={completedTasks} pomodoroMin={pomodoroMin} pomodoroSec={pomodoroSec} pomodoroRunning={pomodoroRunning} pomodoroMode={pomodoroMode} setPomodoroRunning={setPomodoroRunning} setPomodoroMin={setPomodoroMin} setPomodoroSec={setPomodoroSec} setPomodoroMode={setPomodoroMode} newTask={newTask} setNewTask={setNewTask} addTask={addTask} gpa={gpa} sat={sat} />}
+              {activeTab === "home" && (
+                <HomeTab
+                  tasks={tasks} toggleTask={toggleTask} progress={progress} completedTasks={completedTasks}
+                  pomodoroMin={pomodoroMin} pomodoroSec={pomodoroSec} pomodoroRunning={pomodoroRunning} pomodoroMode={pomodoroMode}
+                  setPomodoroRunning={setPomodoroRunning} setPomodoroMin={setPomodoroMin}
+                  setPomodoroSec={setPomodoroSec} setPomodoroMode={setPomodoroMode}
+                  newTask={newTask} setNewTask={setNewTask} addTask={addTask}
+                  gpa={displayGpa} sat={displaySat} displayName={displayName}
+                />
+              )}
               {activeTab === "planner" && <PlannerTab tasks={tasks} toggleTask={toggleTask} newTask={newTask} setNewTask={setNewTask} addTask={addTask} />}
               {activeTab === "notes" && <NotesTab />}
               {activeTab === "college" && <CollegeTab />}
               {activeTab === "scholarships" && <ScholarshipsTab />}
               {activeTab === "internships" && <InternshipsTab />}
-              {activeTab === "chancer" && <ChancerTab gpa={gpa} sat={sat} setGpa={setGpa} setSat={setSat} />}
+              {activeTab === "chancer" && <ChancerTab gpa={displayGpa} sat={displaySat} />}
             </motion.div>
           </AnimatePresence>
         </div>
@@ -190,23 +259,27 @@ export default function Dashboard() {
 
 // ─── HOME TAB ────────────────────────────────────────────────────────────────
 
-function HomeTab({ tasks, toggleTask, progress, completedTasks, pomodoroMin, pomodoroSec, pomodoroRunning, pomodoroMode, setPomodoroRunning, setPomodoroMin, setPomodoroSec, setPomodoroMode, newTask, setNewTask, addTask, gpa, sat }: {
+function HomeTab({ tasks, toggleTask, progress, completedTasks, pomodoroMin, pomodoroSec, pomodoroRunning, pomodoroMode, setPomodoroRunning, setPomodoroMin, setPomodoroSec, setPomodoroMode, newTask, setNewTask, addTask, gpa, sat, displayName }: {
   tasks: Task[]; toggleTask: (id: number) => void; progress: number; completedTasks: number;
   pomodoroMin: number; pomodoroSec: number; pomodoroRunning: boolean; pomodoroMode: string;
   setPomodoroRunning: (v: boolean) => void; setPomodoroMin: (v: number) => void;
   setPomodoroSec: (v: number) => void; setPomodoroMode: (v: "focus" | "break") => void;
   newTask: string; setNewTask: (v: string) => void; addTask: (e: React.FormEvent) => void;
-  gpa: string; sat: string;
+  gpa: string; sat: string; displayName: string;
 }) {
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
   return (
     <div style={s.homeGrid}>
-      {/* Welcome */}
       <Card style={{ gridColumn: "1 / -1", background: "linear-gradient(135deg, rgba(255,107,107,0.12), rgba(78,205,196,0.08))" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 20 }}>
           <div>
-            <h2 style={{ fontSize: 32, fontWeight: 900, letterSpacing: "-0.5px", marginBottom: 8 }}>Good morning, Jordan 👋</h2>
+            <h2 style={{ fontSize: 32, fontWeight: 900, letterSpacing: "-0.5px", marginBottom: 8 }}>
+              {greeting}, {displayName} 👋
+            </h2>
             <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 16 }}>
-              You have {tasks.filter((t) => !t.done && t.due === "Today").length} tasks due today.
+              You have {tasks.filter((t) => !t.done && t.due === "Today").length} tasks due today. Keep going!
             </p>
           </div>
           <div style={{ display: "flex", gap: 24 }}>
@@ -217,24 +290,18 @@ function HomeTab({ tasks, toggleTask, progress, completedTasks, pomodoroMin, pom
         </div>
       </Card>
 
-      {/* Progress */}
       <Card>
         <div style={s.cardTitle}>Today&apos;s Progress</div>
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", position: "relative", margin: "8px auto", width: 120, height: 120 }}>
           <svg width="120" height="120" viewBox="0 0 120 120">
             <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
-            <motion.circle
-              cx="60" cy="60" r="50" fill="none" stroke="url(#grad)" strokeWidth="10" strokeLinecap="round"
-              strokeDasharray={314}
-              initial={{ strokeDashoffset: 314 }}
+            <motion.circle cx="60" cy="60" r="50" fill="none" stroke="url(#grad)" strokeWidth="10" strokeLinecap="round"
+              strokeDasharray={314} initial={{ strokeDashoffset: 314 }}
               animate={{ strokeDashoffset: 314 - (314 * progress) / 100 }}
-              transition={{ duration: 1, ease: "easeOut" }}
-              transform="rotate(-90 60 60)"
-            />
+              transition={{ duration: 1, ease: "easeOut" }} transform="rotate(-90 60 60)" />
             <defs>
               <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#FF6B6B" />
-                <stop offset="100%" stopColor="#4ECDC4" />
+                <stop offset="0%" stopColor="#FF6B6B" /><stop offset="100%" stopColor="#4ECDC4" />
               </linearGradient>
             </defs>
           </svg>
@@ -243,12 +310,9 @@ function HomeTab({ tasks, toggleTask, progress, completedTasks, pomodoroMin, pom
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Complete</div>
           </div>
         </div>
-        <p style={{ textAlign: "center", fontSize: 14, color: "rgba(255,255,255,0.4)", marginTop: 12 }}>
-          {completedTasks} of {tasks.length} tasks done
-        </p>
+        <p style={{ textAlign: "center", fontSize: 14, color: "rgba(255,255,255,0.4)", marginTop: 12 }}>{completedTasks} of {tasks.length} tasks done</p>
       </Card>
 
-      {/* Pomodoro */}
       <Card>
         <div style={s.cardTitle}>Focus Timer</div>
         <div style={{ textAlign: "center" }}>
@@ -256,24 +320,16 @@ function HomeTab({ tasks, toggleTask, progress, completedTasks, pomodoroMin, pom
             <button onClick={() => { setPomodoroMode("focus"); setPomodoroMin(25); setPomodoroSec(0); setPomodoroRunning(false); }} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit", color: pomodoroMode === "focus" ? "#FF6B6B" : "rgba(255,255,255,0.3)" }}>Focus</button>
             <button onClick={() => { setPomodoroMode("break"); setPomodoroMin(5); setPomodoroSec(0); setPomodoroRunning(false); }} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit", color: pomodoroMode === "break" ? "#4ECDC4" : "rgba(255,255,255,0.3)" }}>Break</button>
           </div>
-          <motion.div
-            style={{ fontSize: 52, fontWeight: 900, letterSpacing: "-2px", marginBottom: 20, color: pomodoroMode === "focus" ? "#FF6B6B" : "#4ECDC4" }}
-            animate={{ scale: pomodoroRunning ? [1, 1.02, 1] : 1 }}
-            transition={{ repeat: pomodoroRunning ? Infinity : 0, duration: 1 }}
-          >
+          <motion.div style={{ fontSize: 52, fontWeight: 900, letterSpacing: "-2px", marginBottom: 20, color: pomodoroMode === "focus" ? "#FF6B6B" : "#4ECDC4" }} animate={{ scale: pomodoroRunning ? [1, 1.02, 1] : 1 }} transition={{ repeat: pomodoroRunning ? Infinity : 0, duration: 1 }}>
             {String(pomodoroMin).padStart(2, "0")}:{String(pomodoroSec).padStart(2, "0")}
           </motion.div>
-          <motion.button
-            whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-            onClick={() => setPomodoroRunning(!pomodoroRunning)}
-            style={{ padding: "10px 32px", border: "none", borderRadius: 100, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", background: pomodoroRunning ? "rgba(255,255,255,0.1)" : "linear-gradient(135deg,#FF6B6B,#FF8E53)" }}
-          >
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setPomodoroRunning(!pomodoroRunning)}
+            style={{ padding: "10px 32px", border: "none", borderRadius: 100, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", background: pomodoroRunning ? "rgba(255,255,255,0.1)" : "linear-gradient(135deg,#FF6B6B,#FF8E53)" }}>
             {pomodoroRunning ? "⏸ Pause" : "▶ Start"}
           </motion.button>
         </div>
       </Card>
 
-      {/* Tasks */}
       <Card style={{ gridColumn: "span 2" }}>
         <div style={s.cardTitle}>Today&apos;s Tasks</div>
         <form onSubmit={addTask} style={{ display: "flex", gap: 10, marginBottom: 20 }}>
@@ -281,13 +337,10 @@ function HomeTab({ tasks, toggleTask, progress, completedTasks, pomodoroMin, pom
           <button type="submit" style={s.addBtn}>+</button>
         </form>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {tasks.slice(0, 5).map((task) => (
-            <TaskRow key={task.id} task={task} onToggle={() => toggleTask(task.id)} />
-          ))}
+          {tasks.slice(0, 5).map((task) => <TaskRow key={task.id} task={task} onToggle={() => toggleTask(task.id)} />)}
         </div>
       </Card>
 
-      {/* Deadlines */}
       <Card>
         <div style={s.cardTitle}>Upcoming Deadlines</div>
         {INTERNSHIPS.slice(0, 3).map((item) => (
@@ -302,7 +355,6 @@ function HomeTab({ tasks, toggleTask, progress, completedTasks, pomodoroMin, pom
         ))}
       </Card>
 
-      {/* Scholarships */}
       <Card>
         <div style={s.cardTitle}>Top Scholarship Matches</div>
         {SCHOLARSHIPS.slice(0, 3).map((sc) => (
@@ -345,29 +397,22 @@ function PlannerTab({ tasks, toggleTask, newTask, setNewTask, addTask }: {
         <div style={{ display: "grid", gridTemplateColumns: "60px repeat(7, 1fr)", gap: 2, overflowX: "auto" as const }}>
           <div />
           {days.map((d) => (
-            <div key={d} style={{ textAlign: "center" as const, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)", padding: "8px 0", letterSpacing: "0.05em" }}>{d}</div>
+            <div key={d} style={{ textAlign: "center" as const, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)", padding: "8px 0" }}>{d}</div>
           ))}
-          {hours.map((hour, hi) => (
-            // Fixed: use array instead of Fragment to avoid key issues
-            [
-              <div key={`hour-${hi}`} style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", padding: "8px 4px", textAlign: "right" as const }}>{hour}</div>,
-              ...days.map((d, di) => {
-                const event = events.find((e) => e.day === di && e.hour === hi);
-                return (
-                  <motion.div
-                    key={`${d}-${hour}`}
-                    whileHover={{ scale: 1.05 }}
-                    style={{ height: 40, borderRadius: 6, position: "relative" as const, cursor: "pointer", background: event ? event.color + "22" : "transparent", border: event ? `1px solid ${event.color}66` : "1px solid rgba(255,255,255,0.04)" }}
-                  >
-                    {event && <div style={{ fontSize: 10, padding: "4px 6px", fontWeight: 600, overflow: "hidden", color: event.color }}>{event.title}</div>}
-                  </motion.div>
-                );
-              })
-            ]
-          ))}
+          {hours.map((hour, hi) => ([
+            <div key={`hour-${hi}`} style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", padding: "8px 4px", textAlign: "right" as const }}>{hour}</div>,
+            ...days.map((d, di) => {
+              const event = events.find((e) => e.day === di && e.hour === hi);
+              return (
+                <motion.div key={`${d}-${hour}`} whileHover={{ scale: 1.05 }}
+                  style={{ height: 40, borderRadius: 6, position: "relative" as const, cursor: "pointer", background: event ? event.color + "22" : "transparent", border: event ? `1px solid ${event.color}66` : "1px solid rgba(255,255,255,0.04)" }}>
+                  {event && <div style={{ fontSize: 10, padding: "4px 6px", fontWeight: 600, color: event.color }}>{event.title}</div>}
+                </motion.div>
+              );
+            })
+          ]))}
         </div>
       </Card>
-
       <div style={{ width: 320 }}>
         <Card>
           <div style={s.cardTitle}>All Tasks</div>
@@ -427,14 +472,14 @@ function NotesTab() {
         </Card>
         <Card>
           <div style={s.cardTitle}>✨ AI Flashcard Generator</div>
-          <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Paste your notes here..." style={{ width: "100%", height: 140, padding: "14px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, color: "#fff", fontSize: 14, resize: "vertical", fontFamily: "inherit", outline: "none", boxSizing: "border-box" as const, marginBottom: 16 }} />
+          <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Paste your notes here..."
+            style={{ width: "100%", height: 140, padding: "14px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, color: "#fff", fontSize: 14, resize: "vertical", fontFamily: "inherit", outline: "none", boxSizing: "border-box" as const, marginBottom: 16 }} />
           <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={generateCards} disabled={generating}
             style={{ width: "100%", padding: "14px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 14, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
             {generating ? "✨ Generating..." : "✨ Generate Flashcards"}
           </motion.button>
         </Card>
       </div>
-
       <div style={{ width: 340 }}>
         {flashcards.length > 0 ? (
           <Card>
@@ -485,7 +530,7 @@ function CollegeTab() {
               <div style={{ fontSize: 28 }}>{col.emoji}</div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>{col.name}</div>
-                <div style={{ flex: 1, height: 8, background: "rgba(255,255,255,0.08)", borderRadius: 100, overflow: "hidden" }}>
+                <div style={{ height: 8, background: "rgba(255,255,255,0.08)", borderRadius: 100, overflow: "hidden" }}>
                   <motion.div initial={{ width: 0 }} animate={{ width: `${col.chance}%` }} transition={{ delay: i * 0.05 + 0.3, duration: 0.8 }} style={{ height: "100%", borderRadius: 100, background: col.color }} />
                 </div>
               </div>
@@ -562,17 +607,10 @@ function InternshipsTab() {
 
 // ─── CHANCER TAB ─────────────────────────────────────────────────────────────
 
-function ChancerTab({ gpa, sat, setGpa, setSat }: { gpa: string; sat: string; setGpa: (v: string) => void; setSat: (v: string) => void }) {
+function ChancerTab({ gpa, sat }: { gpa: string; sat: string }) {
   const [localGpa, setLocalGpa] = useState(gpa);
   const [localSat, setLocalSat] = useState(sat);
   const [updated, setUpdated] = useState(false);
-
-  function handleUpdate() {
-    setGpa(localGpa);
-    setSat(localSat);
-    setUpdated(true);
-    setTimeout(() => setUpdated(false), 2000);
-  }
 
   function getLabel(chance: number) {
     if (chance < 15) return { text: "Reach", color: "#FF6B6B" };
@@ -602,12 +640,11 @@ function ChancerTab({ gpa, sat, setGpa, setSat }: { gpa: string; sat: string; se
               style={{ width: "100%", padding: "12px 16px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "#fff", fontSize: 15, outline: "none", fontFamily: "inherit", boxSizing: "border-box" as const }} />
           </div>
         ))}
-        <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }} onClick={handleUpdate}
+        <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }} onClick={() => { setUpdated(true); setTimeout(() => setUpdated(false), 2000); }}
           style={{ width: "100%", padding: "14px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 14, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
           {updated ? "✅ Updated!" : "📊 Update Chances"}
         </motion.button>
       </Card>
-
       <Card style={{ flex: 1 }}>
         <div style={s.cardTitle}>Admission Chances</div>
         <div style={{ display: "flex", flexDirection: "column" as const, gap: 20 }}>
@@ -672,9 +709,7 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: () => void }) {
         style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${task.done ? "#4ECDC4" : "rgba(255,255,255,0.2)"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer", background: task.done ? "#4ECDC4" : "transparent" }}>
         {task.done && <span style={{ fontSize: 10, color: "#000" }}>✓</span>}
       </motion.div>
-      <span style={{ flex: 1, fontSize: 14, textDecoration: task.done ? "line-through" : "none", color: task.done ? "rgba(255,255,255,0.3)" : "#fff" }}>
-        {task.text}
-      </span>
+      <span style={{ flex: 1, fontSize: 14, textDecoration: task.done ? "line-through" : "none", color: task.done ? "rgba(255,255,255,0.3)" : "#fff" }}>{task.text}</span>
       <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: task.priority === "high" ? "#FF6B6B" : task.priority === "medium" ? "#FFEAA7" : "#96CEB4" }} />
       <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", whiteSpace: "nowrap" }}>{task.due}</span>
     </motion.div>
