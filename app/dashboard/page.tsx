@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, ReactNode } from "react";
+import { useState, useEffect, useRef, ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
@@ -9,11 +9,71 @@ import { supabase } from "@/lib/supabase";
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
 interface Task {
-  id: number;
+  id: string;
   text: string;
   done: boolean;
   priority: "high" | "medium" | "low";
   due: string;
+}
+
+interface NoteSet {
+  id: string;
+  title: string;
+  subject: string;
+  content: string;
+  flashcards: { q: string; a: string }[];
+  practice_questions: PracticeQ[];
+  created_at: string;
+}
+
+interface PracticeQ {
+  question: string;
+  options: string[];
+  answer: string;
+  explanation: string;
+}
+
+interface CollegeEntry {
+  id: string;
+  college_name: string;
+  chance: number;
+  status: string;
+}
+
+interface ChanceResult {
+  chance: number;
+  acceptanceRate: string;
+  avgGPA: string;
+  avgSAT: string;
+  avgACT: string;
+  label: string;
+  academicRating: number;
+  ecRating: number;
+  overallRating: number;
+  strengths: string[];
+  weaknesses: string[];
+  tip: string;
+  normalizedGpa: string;
+}
+
+interface StudentProfile {
+  gpa: string;
+  gpaScale: string;
+  gpaType: string;
+  sat: string;
+  act: string;
+  apCourses: string;
+  classRank: string;
+  extracurriculars: string;
+  leadershipRoles: string;
+  awards: string;
+  sportsLevel: string;
+  recLetterStrength: string;
+  firstGen: boolean;
+  legacy: boolean;
+  state: string;
+  major: string;
+  essayStrength: string;
 }
 
 interface Profile {
@@ -22,17 +82,19 @@ interface Profile {
   school: string;
   grade: string;
   gpa: string;
+  gpa_scale: string;
+  gpa_normalized: string;
+  gpa_type: string;
   sat: string;
+  extracurriculars: string;
+  awards: string;
+  rec_letter_strength: string;
   dream_schools: string[];
   interests: string[];
   onboarded: boolean;
 }
 
-interface StyleMap {
-  [key: string]: React.CSSProperties;
-}
-
-// ─── DATA ────────────────────────────────────────────────────────────────────
+interface StyleMap { [key: string]: React.CSSProperties; }
 
 const SIDEBAR_ITEMS = [
   { id: "home", icon: "⌂", label: "Home" },
@@ -44,211 +106,194 @@ const SIDEBAR_ITEMS = [
   { id: "chancer", icon: "📊", label: "Chancer" },
 ];
 
-const INITIAL_TASKS: Task[] = [
-  { id: 1, text: "Submit AP Chemistry lab report", done: false, priority: "high", due: "Today" },
-  { id: 2, text: "Practice SAT Math section 4", done: false, priority: "high", due: "Today" },
-  { id: 3, text: "Request rec letter from Mr. Davis", done: true, priority: "medium", due: "Done" },
-  { id: 4, text: "Draft Common App essay intro", done: false, priority: "medium", due: "Tomorrow" },
-  { id: 5, text: "Research MIT financial aid portal", done: false, priority: "low", due: "This week" },
+const PRIORITY_CONFIG = {
+  high: { label: "High", color: "#FF6B6B", bg: "rgba(255,107,107,0.15)", border: "rgba(255,107,107,0.4)", emoji: "🔴" },
+  medium: { label: "Medium", color: "#FFEAA7", bg: "rgba(255,234,167,0.12)", border: "rgba(255,234,167,0.35)", emoji: "🟡" },
+  low: { label: "Low", color: "#96CEB4", bg: "rgba(150,206,180,0.12)", border: "rgba(150,206,180,0.35)", emoji: "🟢" },
+};
+
+const DUE_OPTIONS = [
+  { value: "Today", color: "#FF6B6B", bg: "rgba(255,107,107,0.15)" },
+  { value: "Tomorrow", color: "#FF8E53", bg: "rgba(255,142,83,0.15)" },
+  { value: "This week", color: "#FFEAA7", bg: "rgba(255,234,167,0.12)" },
+  { value: "Next week", color: "#4ECDC4", bg: "rgba(78,205,196,0.12)" },
+  { value: "This month", color: "#96CEB4", bg: "rgba(150,206,180,0.12)" },
 ];
 
-const INTERNSHIPS = [
-  { co: "Google", role: "CSSI Program", deadline: "Feb 28", tag: "CS", color: "#4285F4" },
-  { co: "MIT", role: "Research Intern", deadline: "Mar 5", tag: "Research", color: "#A31F34" },
-  { co: "Goldman Sachs", role: "Summer Analyst", deadline: "Mar 15", tag: "Finance", color: "#0066CC" },
-  { co: "NASA", role: "High School Apprentice", deadline: "Mar 20", tag: "STEM", color: "#FC3D21" },
+const SCHOLARSHIP_DATA = [
+  { name: "Gates Millennium Scholars", amount: "$10,000+", deadline: "Jan 15", url: "https://gmsp.org", tags: ["Need-Based", "Leadership"], desc: "For outstanding minority students with significant financial need." },
+  { name: "Coca-Cola Scholars", amount: "$20,000", deadline: "Oct 31", url: "https://www.coca-colascholarsfoundation.org", tags: ["Leadership"], desc: "For exceptional high school seniors demonstrating leadership." },
+  { name: "Jack Kent Cooke Foundation", amount: "$40,000", deadline: "Sep 30", url: "https://www.jkcf.org", tags: ["Need-Based"], desc: "For high-achieving students with financial need." },
+  { name: "Questbridge National College Match", amount: "Full Ride", deadline: "Sep 27", url: "https://www.questbridge.org", tags: ["Need-Based", "STEM"], desc: "Connects low-income students with top colleges." },
+  { name: "Davidson Fellows Scholarship", amount: "$50,000", deadline: "Feb 12", url: "https://www.davidsongifted.org/fellows-scholarship", tags: ["STEM", "Arts"], desc: "For students who complete a significant piece of work." },
+  { name: "National Merit Scholarship", amount: "$2,500+", deadline: "PSAT-based", url: "https://www.nationalmerit.org", tags: ["STEM"], desc: "Based on PSAT/NMSQT performance." },
+  { name: "Elks National Foundation", amount: "$4,000+", deadline: "Nov 12", url: "https://www.elks.org/enf/scholars", tags: ["Leadership"], desc: "For students demonstrating leadership and community service." },
+  { name: "Regeneron Science Talent Search", amount: "$250,000", deadline: "Nov", url: "https://www.societyforscience.org/regeneron-sts", tags: ["STEM"], desc: "Prestigious science competition for high school seniors." },
 ];
 
-const SCHOLARSHIPS = [
-  { name: "Gates Millennium", amount: "$10,000+", match: 94, deadline: "Jan 15" },
-  { name: "Coca-Cola Scholars", amount: "$20,000", match: 87, deadline: "Oct 31" },
-  { name: "Jack Kent Cooke", amount: "$40,000", match: 82, deadline: "Sep 30" },
-  { name: "Questbridge", amount: "Full Ride", match: 91, deadline: "Sep 27" },
+const INTERNSHIP_DATA = [
+  { co: "Google", role: "CSSI Computer Science Summer Institute", deadline: "Feb 28", tag: "CS", color: "#4285F4", url: "https://buildyourfuture.withgoogle.com/programs/computer-science-summer-institute" },
+  { co: "MIT", role: "Research Science Institute (RSI)", deadline: "Dec 15", tag: "Research", color: "#A31F34", url: "https://www.cee.org/research-science-institute" },
+  { co: "NASA", role: "High School Apprenticeship Program", deadline: "Mar 1", tag: "STEM", color: "#FC3D21", url: "https://intern.nasa.gov" },
+  { co: "Goldman Sachs", role: "Possibilities Summit", deadline: "Mar 15", tag: "Finance", color: "#0066CC", url: "https://www.goldmansachs.com/careers/students" },
+  { co: "Microsoft", role: "TEALS Program", deadline: "Rolling", tag: "CS", color: "#00A4EF", url: "https://www.microsoft.com/en-us/teals" },
+  { co: "NIH", role: "High School Scientific Training & Enrichment", deadline: "Jan 15", tag: "Research", color: "#1A5276", url: "https://www.training.nih.gov/high_school_students" },
 ];
 
-const COLLEGES = [
-  { name: "MIT", chance: 12, trend: "+2", color: "#A31F34", emoji: "🏛" },
-  { name: "Stanford", chance: 9, trend: "+1", color: "#8C1515", emoji: "🌲" },
-  { name: "Harvard", chance: 11, trend: "0", color: "#A51C30", emoji: "📚" },
-  { name: "UCLA", chance: 67, trend: "+8", color: "#2774AE", emoji: "🌊" },
-  { name: "UMich", chance: 81, trend: "+5", color: "#00274C", emoji: "🏆" },
-  { name: "Purdue", chance: 94, trend: "+2", color: "#CEB888", emoji: "🚀" },
-];
-
-const NOTES = [
-  { title: "AP Chem – Electron Config", subject: "Chemistry", updated: "2h ago", cards: 24 },
-  { title: "US History – Civil War Era", subject: "History", updated: "Yesterday", cards: 41 },
-  { title: "Calc BC – Integration", subject: "Math", updated: "3d ago", cards: 18 },
-];
-
-// ─── SINGLE EXPORT DEFAULT ───────────────────────────────────────────────────
+// ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { user, isLoaded } = useUser();
   const router = useRouter();
 
-  // Auth + profile state
   const [profile, setProfile] = useState<Profile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-
-  // Dashboard state
   const [activeTab, setActiveTab] = useState("home");
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [notes, setNotes] = useState<NoteSet[]>([]);
+  const [colleges, setColleges] = useState<CollegeEntry[]>([]);
   const [pomodoroMin, setPomodoroMin] = useState(25);
   const [pomodoroSec, setPomodoroSec] = useState(0);
   const [pomodoroRunning, setPomodoroRunning] = useState(false);
   const [pomodoroMode, setPomodoroMode] = useState<"focus" | "break">("focus");
   const [newTask, setNewTask] = useState("");
+  const [streak, setStreak] = useState(0);
 
-  // ── Step 1: Check auth + load profile from Supabase ──
   useEffect(() => {
-    async function loadProfile() {
+    async function loadAll() {
       if (!isLoaded) return;
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-      const { data } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .single();
+      if (!user) { router.push("/login"); return; }
+      const { data: profileData } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+      if (!profileData?.onboarded) { router.push("/onboarding"); return; }
+      setProfile(profileData);
 
-      if (!data || !data.onboarded) {
-        router.push("/onboarding");
-        return;
+      const { data: taskData } = await supabase.from("tasks").select("*").eq("user_id", user.id).order("created_at", { ascending: true });
+      setTasks(taskData || []);
+
+      const { data: noteData } = await supabase.from("note_sets").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+      setNotes((noteData || []).map((n: { flashcards: unknown; practice_questions: unknown; [k: string]: unknown }) => ({
+        ...n,
+        flashcards: Array.isArray(n.flashcards) ? n.flashcards : JSON.parse((n.flashcards as string) || "[]"),
+        practice_questions: Array.isArray(n.practice_questions) ? n.practice_questions : JSON.parse((n.practice_questions as string) || "[]"),
+      })) as NoteSet[]);
+
+      const { data: collegeData } = await supabase.from("user_colleges").select("*").eq("user_id", user.id).order("created_at", { ascending: true });
+      setColleges(collegeData || []);
+
+      const today = new Date().toDateString();
+      const last = localStorage.getItem(`streak_${user.id}`);
+      const cnt = parseInt(localStorage.getItem(`streak_cnt_${user.id}`) || "0");
+      if (last === today) setStreak(cnt);
+      else if (last === new Date(Date.now() - 86400000).toDateString()) {
+        setStreak(cnt + 1);
+        localStorage.setItem(`streak_cnt_${user.id}`, String(cnt + 1));
+        localStorage.setItem(`streak_${user.id}`, today);
+      } else {
+        setStreak(1);
+        localStorage.setItem(`streak_cnt_${user.id}`, "1");
+        localStorage.setItem(`streak_${user.id}`, today);
       }
-      setProfile(data);
       setAuthLoading(false);
     }
-    loadProfile();
+    loadAll();
   }, [user, isLoaded, router]);
 
-  // ── Step 2: Pomodoro timer ──
   useEffect(() => {
     if (!pomodoroRunning) return;
-    const interval = setInterval(() => {
-      if (pomodoroSec > 0) {
-        setPomodoroSec((s) => s - 1);
-      } else if (pomodoroMin > 0) {
-        setPomodoroMin((m) => m - 1);
-        setPomodoroSec(59);
-      } else {
+    const t = setInterval(() => {
+      if (pomodoroSec > 0) setPomodoroSec(s => s - 1);
+      else if (pomodoroMin > 0) { setPomodoroMin(m => m - 1); setPomodoroSec(59); }
+      else {
         setPomodoroRunning(false);
-        if (pomodoroMode === "focus") {
-          setPomodoroMode("break");
-          setPomodoroMin(5);
-        } else {
-          setPomodoroMode("focus");
-          setPomodoroMin(25);
-        }
+        setPomodoroMode(m => m === "focus" ? "break" : "focus");
+        setPomodoroMin(pomodoroMode === "focus" ? 5 : 25);
       }
     }, 1000);
-    return () => clearInterval(interval);
+    return () => clearInterval(t);
   }, [pomodoroRunning, pomodoroMin, pomodoroSec, pomodoroMode]);
 
-  function toggleTask(id: number) {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
-  }
-
-  function addTask(e: React.FormEvent) {
+  async function addTask(e: React.FormEvent) {
     e.preventDefault();
-    if (!newTask.trim()) return;
-    setTasks((prev) => [...prev, { id: Date.now(), text: newTask, done: false, priority: "medium", due: "This week" }]);
+    if (!newTask.trim() || !user) return;
+    const { data } = await supabase.from("tasks").insert({ user_id: user.id, text: newTask, done: false, priority: "medium", due: "This week" }).select().single();
+    if (data) setTasks(prev => [...prev, data]);
     setNewTask("");
   }
 
-  const completedTasks = tasks.filter((t) => t.done).length;
-  const progress = Math.round((completedTasks / tasks.length) * 100);
-
-  // ── Loading screen while auth is checked ──
-  if (authLoading) {
-    return (
-      <div style={{ minHeight: "100vh", background: "#0A0A0F", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff" }}>
-        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ fontSize: 40, marginBottom: 20 }}>◈</motion.div>
-        <div style={{ fontSize: 16, color: "rgba(255,255,255,0.4)" }}>Loading your dashboard...</div>
-      </div>
-    );
+  async function toggleTask(id: string) {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    await supabase.from("tasks").update({ done: !task.done }).eq("id", id);
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
   }
 
-  // Use real profile data from Supabase
+  async function deleteTask(id: string) {
+    await supabase.from("tasks").delete().eq("id", id);
+    setTasks(prev => prev.filter(t => t.id !== id));
+  }
+
+  const completedTasks = tasks.filter(t => t.done).length;
+  const progress = tasks.length === 0 ? 0 : Math.round((completedTasks / tasks.length) * 100);
+
+  if (authLoading) return (
+    <div style={{ minHeight: "100vh", background: "#0A0A0F", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", fontFamily: "'Syne', system-ui, sans-serif" }}>
+      <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ fontSize: 40, marginBottom: 20 }}>◈</motion.div>
+      <div style={{ fontSize: 16, color: "rgba(255,255,255,0.4)" }}>Loading your dashboard...</div>
+    </div>
+  );
+
   const displayName = profile?.name || "Student";
   const displayGpa = profile?.gpa || "—";
   const displaySat = profile?.sat || "—";
 
-  // ── Main dashboard UI ──
   return (
     <div style={s.root}>
-      {/* SIDEBAR */}
       <motion.aside initial={{ x: -80, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.5 }} style={s.sidebar}>
         <div style={s.sidebarLogo}>
-          <span style={{ fontSize: 22, color: "#FF6B6B" }}>◈</span>
+          <div style={{ width: 32, height: 32, borderRadius: 10, background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>◈</div>
           <span style={s.sidebarLogoText}>Apex</span>
         </div>
-        <nav style={{ flex: 1, padding: "16px 0" }}>
+        <nav style={{ flex: 1, padding: "12px 0" }}>
           {SIDEBAR_ITEMS.map((item) => (
-            <motion.button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              whileHover={{ x: 4 }}
-              whileTap={{ scale: 0.97 }}
-              style={{
-                ...s.sidebarBtn,
-                background: activeTab === item.id ? "rgba(255,107,107,0.15)" : "transparent",
-                borderLeft: activeTab === item.id ? "3px solid #FF6B6B" : "3px solid transparent",
-                color: activeTab === item.id ? "#FF6B6B" : "rgba(255,255,255,0.5)",
-              }}
-            >
-              <span style={{ fontSize: 18 }}>{item.icon}</span>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{item.label}</span>
+            <motion.button key={item.id} onClick={() => setActiveTab(item.id)} whileHover={{ x: 4 }} whileTap={{ scale: 0.97 }}
+              style={{ ...s.sidebarBtn, background: activeTab === item.id ? "rgba(255,107,107,0.12)" : "transparent", borderLeft: activeTab === item.id ? "3px solid #FF6B6B" : "3px solid transparent", color: activeTab === item.id ? "#FF6B6B" : "rgba(255,255,255,0.45)" }}>
+              <span style={{ fontSize: 16 }}>{item.icon}</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{item.label}</span>
+              {activeTab === item.id && <motion.div layoutId="activeIndicator" style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: "#FF6B6B" }} />}
             </motion.button>
           ))}
         </nav>
         <div style={s.sidebarProfile}>
           <div style={s.avatar}>{displayName.charAt(0).toUpperCase()}</div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>{displayName}</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{profile?.grade || "Student"}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>{profile?.grade || "Student"}</div>
           </div>
         </div>
       </motion.aside>
 
-      {/* MAIN */}
       <main style={s.main}>
-        <motion.div initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={s.topbar}>
+        <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={s.topbar}>
           <div>
-            <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.5px" }}>
-              {SIDEBAR_ITEMS.find((i) => i.id === activeTab)?.label}
-            </div>
-            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>
-              {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-            </div>
+            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.5px" }}>{SIDEBAR_ITEMS.find(i => i.id === activeTab)?.label}</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <div style={s.streakBadge}>🔥 7 day streak</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={s.streakBadge}>🔥 {streak} day streak</div>
             <div style={s.avatarSm}>{displayName.charAt(0).toUpperCase()}</div>
           </div>
         </motion.div>
 
-        <div style={{ padding: "32px", flex: 1 }}>
+        <div style={{ padding: "28px 32px", flex: 1 }}>
           <AnimatePresence mode="wait">
-            <motion.div key={activeTab} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }}>
-              {activeTab === "home" && (
-                <HomeTab
-                  tasks={tasks} toggleTask={toggleTask} progress={progress} completedTasks={completedTasks}
-                  pomodoroMin={pomodoroMin} pomodoroSec={pomodoroSec} pomodoroRunning={pomodoroRunning} pomodoroMode={pomodoroMode}
-                  setPomodoroRunning={setPomodoroRunning} setPomodoroMin={setPomodoroMin}
-                  setPomodoroSec={setPomodoroSec} setPomodoroMode={setPomodoroMode}
-                  newTask={newTask} setNewTask={setNewTask} addTask={addTask}
-                  gpa={displayGpa} sat={displaySat} displayName={displayName}
-                />
-              )}
-              {activeTab === "planner" && <PlannerTab tasks={tasks} toggleTask={toggleTask} newTask={newTask} setNewTask={setNewTask} addTask={addTask} />}
-              {activeTab === "notes" && <NotesTab />}
-              {activeTab === "college" && <CollegeTab />}
+            <motion.div key={activeTab} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }} transition={{ duration: 0.25 }}>
+              {activeTab === "home" && <HomeTab tasks={tasks} toggleTask={toggleTask} deleteTask={deleteTask} progress={progress} completedTasks={completedTasks} pomodoroMin={pomodoroMin} pomodoroSec={pomodoroSec} pomodoroRunning={pomodoroRunning} pomodoroMode={pomodoroMode} setPomodoroRunning={setPomodoroRunning} setPomodoroMin={setPomodoroMin} setPomodoroSec={setPomodoroSec} setPomodoroMode={setPomodoroMode} newTask={newTask} setNewTask={setNewTask} addTask={addTask} gpa={displayGpa} sat={displaySat} displayName={displayName} setActiveTab={setActiveTab} />}
+              {activeTab === "planner" && <PlannerTab tasks={tasks} toggleTask={toggleTask} deleteTask={deleteTask} newTask={newTask} setNewTask={setNewTask} addTask={addTask} setTasks={setTasks} />}
+              {activeTab === "notes" && <NotesTab notes={notes} setNotes={setNotes} userId={user!.id} />}
+              {activeTab === "college" && <CollegeTab colleges={colleges} setColleges={setColleges} userId={user!.id} />}
               {activeTab === "scholarships" && <ScholarshipsTab />}
               {activeTab === "internships" && <InternshipsTab />}
-              {activeTab === "chancer" && <ChancerTab gpa={displayGpa} sat={displaySat} />}
+              {activeTab === "chancer" && <ChancerTab initialGpa={displayGpa} initialSat={displaySat} userId={user!.id} dreamSchools={profile?.dream_schools || []} colleges={colleges} setColleges={setColleges} fullProfile={profile} />}
             </motion.div>
           </AnimatePresence>
         </div>
@@ -259,116 +304,98 @@ export default function Dashboard() {
 
 // ─── HOME TAB ────────────────────────────────────────────────────────────────
 
-function HomeTab({ tasks, toggleTask, progress, completedTasks, pomodoroMin, pomodoroSec, pomodoroRunning, pomodoroMode, setPomodoroRunning, setPomodoroMin, setPomodoroSec, setPomodoroMode, newTask, setNewTask, addTask, gpa, sat, displayName }: {
-  tasks: Task[]; toggleTask: (id: number) => void; progress: number; completedTasks: number;
+function HomeTab({ tasks, toggleTask, deleteTask, progress, completedTasks, pomodoroMin, pomodoroSec, pomodoroRunning, pomodoroMode, setPomodoroRunning, setPomodoroMin, setPomodoroSec, setPomodoroMode, newTask, setNewTask, addTask, gpa, sat, displayName, setActiveTab }: {
+  tasks: Task[]; toggleTask: (id: string) => void; deleteTask: (id: string) => void; progress: number; completedTasks: number;
   pomodoroMin: number; pomodoroSec: number; pomodoroRunning: boolean; pomodoroMode: string;
-  setPomodoroRunning: (v: boolean) => void; setPomodoroMin: (v: number) => void;
-  setPomodoroSec: (v: number) => void; setPomodoroMode: (v: "focus" | "break") => void;
-  newTask: string; setNewTask: (v: string) => void; addTask: (e: React.FormEvent) => void;
-  gpa: string; sat: string; displayName: string;
+  setPomodoroRunning: (v: boolean) => void; setPomodoroMin: (v: number) => void; setPomodoroSec: (v: number) => void; setPomodoroMode: (v: "focus" | "break") => void;
+  newTask: string; setNewTask: (v: string) => void; addTask: (e: React.FormEvent) => void; gpa: string; sat: string; displayName: string; setActiveTab: (t: string) => void;
 }) {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const todayTasks = tasks.filter(t => t.due === "Today" && !t.done);
 
   return (
     <div style={s.homeGrid}>
-      <Card style={{ gridColumn: "1 / -1", background: "linear-gradient(135deg, rgba(255,107,107,0.12), rgba(78,205,196,0.08))" }}>
+      {/* Hero banner */}
+      <Card style={{ gridColumn: "1 / -1", background: "linear-gradient(135deg, rgba(255,107,107,0.1), rgba(78,205,196,0.06))", border: "1px solid rgba(255,107,107,0.15)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 20 }}>
           <div>
-            <h2 style={{ fontSize: 32, fontWeight: 900, letterSpacing: "-0.5px", marginBottom: 8 }}>
-              {greeting}, {displayName} 👋
-            </h2>
-            <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 16 }}>
-              You have {tasks.filter((t) => !t.done && t.due === "Today").length} tasks due today. Keep going!
+            <h2 style={{ fontSize: "clamp(22px,3vw,32px)", fontWeight: 900, letterSpacing: "-0.5px", marginBottom: 6 }}>{greeting}, {displayName} 👋</h2>
+            <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 15 }}>
+              {tasks.length === 0 ? "No tasks yet — add one to get started!" : todayTasks.length > 0 ? `${todayTasks.length} task${todayTasks.length > 1 ? "s" : ""} due today. Keep going!` : `${tasks.filter(t => !t.done).length} tasks remaining. Great momentum!`}
             </p>
           </div>
-          <div style={{ display: "flex", gap: 24 }}>
+          <div style={{ display: "flex", gap: 16 }}>
             <StatPill label="GPA" val={gpa} color="#FF6B6B" />
             <StatPill label="SAT" val={sat} color="#4ECDC4" />
-            <StatPill label="Done" val={`${completedTasks}/${tasks.length}`} color="#96CEB4" />
+            <StatPill label="Done" val={tasks.length === 0 ? "—" : `${completedTasks}/${tasks.length}`} color="#96CEB4" />
           </div>
         </div>
       </Card>
 
+      {/* Progress ring */}
       <Card>
         <div style={s.cardTitle}>Today&apos;s Progress</div>
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", position: "relative", margin: "8px auto", width: 120, height: 120 }}>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", position: "relative", width: 120, height: 120, margin: "0 auto 12px" }}>
           <svg width="120" height="120" viewBox="0 0 120 120">
             <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
-            <motion.circle cx="60" cy="60" r="50" fill="none" stroke="url(#grad)" strokeWidth="10" strokeLinecap="round"
-              strokeDasharray={314} initial={{ strokeDashoffset: 314 }}
-              animate={{ strokeDashoffset: 314 - (314 * progress) / 100 }}
-              transition={{ duration: 1, ease: "easeOut" }} transform="rotate(-90 60 60)" />
-            <defs>
-              <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#FF6B6B" /><stop offset="100%" stopColor="#4ECDC4" />
-              </linearGradient>
-            </defs>
+            <motion.circle cx="60" cy="60" r="50" fill="none" stroke="url(#grad)" strokeWidth="10" strokeLinecap="round" strokeDasharray={314} initial={{ strokeDashoffset: 314 }} animate={{ strokeDashoffset: 314 - (314 * progress) / 100 }} transition={{ duration: 1.2, ease: "easeOut" }} transform="rotate(-90 60 60)" />
+            <defs><linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stopColor="#FF6B6B" /><stop offset="100%" stopColor="#4ECDC4" /></linearGradient></defs>
           </svg>
           <div style={{ position: "absolute", textAlign: "center" }}>
-            <div style={{ fontSize: 28, fontWeight: 900 }}>{progress}%</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Complete</div>
+            <div style={{ fontSize: 26, fontWeight: 900 }}>{progress}%</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>Done</div>
           </div>
         </div>
-        <p style={{ textAlign: "center", fontSize: 14, color: "rgba(255,255,255,0.4)", marginTop: 12 }}>{completedTasks} of {tasks.length} tasks done</p>
+        <p style={{ textAlign: "center", fontSize: 13, color: "rgba(255,255,255,0.35)" }}>{tasks.length === 0 ? "Add tasks to track" : `${completedTasks} / ${tasks.length} tasks`}</p>
       </Card>
 
+      {/* Pomodoro */}
       <Card>
         <div style={s.cardTitle}>Focus Timer</div>
         <div style={{ textAlign: "center" }}>
-          <div style={{ display: "flex", gap: 16, justifyContent: "center", marginBottom: 16 }}>
-            <button onClick={() => { setPomodoroMode("focus"); setPomodoroMin(25); setPomodoroSec(0); setPomodoroRunning(false); }} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit", color: pomodoroMode === "focus" ? "#FF6B6B" : "rgba(255,255,255,0.3)" }}>Focus</button>
-            <button onClick={() => { setPomodoroMode("break"); setPomodoroMin(5); setPomodoroSec(0); setPomodoroRunning(false); }} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit", color: pomodoroMode === "break" ? "#4ECDC4" : "rgba(255,255,255,0.3)" }}>Break</button>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 14 }}>
+            {(["focus", "break"] as const).map(m => (
+              <button key={m} onClick={() => { setPomodoroMode(m); setPomodoroMin(m === "focus" ? 25 : 5); setPomodoroSec(0); setPomodoroRunning(false); }}
+                style={{ padding: "5px 14px", borderRadius: 100, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit", background: pomodoroMode === m ? (m === "focus" ? "rgba(255,107,107,0.2)" : "rgba(78,205,196,0.2)") : "rgba(255,255,255,0.05)", color: pomodoroMode === m ? (m === "focus" ? "#FF6B6B" : "#4ECDC4") : "rgba(255,255,255,0.3)" }}>
+                {m.charAt(0).toUpperCase() + m.slice(1)}
+              </button>
+            ))}
           </div>
-          <motion.div style={{ fontSize: 52, fontWeight: 900, letterSpacing: "-2px", marginBottom: 20, color: pomodoroMode === "focus" ? "#FF6B6B" : "#4ECDC4" }} animate={{ scale: pomodoroRunning ? [1, 1.02, 1] : 1 }} transition={{ repeat: pomodoroRunning ? Infinity : 0, duration: 1 }}>
+          <motion.div style={{ fontSize: 50, fontWeight: 900, letterSpacing: "-2px", marginBottom: 16, color: pomodoroMode === "focus" ? "#FF6B6B" : "#4ECDC4", fontVariantNumeric: "tabular-nums" }} animate={{ scale: pomodoroRunning ? [1, 1.02, 1] : 1 }} transition={{ repeat: Infinity, duration: 1 }}>
             {String(pomodoroMin).padStart(2, "0")}:{String(pomodoroSec).padStart(2, "0")}
           </motion.div>
           <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setPomodoroRunning(!pomodoroRunning)}
-            style={{ padding: "10px 32px", border: "none", borderRadius: 100, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", background: pomodoroRunning ? "rgba(255,255,255,0.1)" : "linear-gradient(135deg,#FF6B6B,#FF8E53)" }}>
+            style={{ padding: "9px 28px", border: "none", borderRadius: 100, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", background: pomodoroRunning ? "rgba(255,255,255,0.08)" : "linear-gradient(135deg,#FF6B6B,#FF8E53)" }}>
             {pomodoroRunning ? "⏸ Pause" : "▶ Start"}
           </motion.button>
         </div>
       </Card>
 
+      {/* Tasks */}
       <Card style={{ gridColumn: "span 2" }}>
-        <div style={s.cardTitle}>Today&apos;s Tasks</div>
-        <form onSubmit={addTask} style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-          <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task..." style={s.taskInput} />
+        <div style={s.cardTitle}>My Tasks</div>
+        <form onSubmit={addTask} style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <input value={newTask} onChange={e => setNewTask(e.target.value)} placeholder="Add a new task..." style={s.taskInput} />
           <button type="submit" style={s.addBtn}>+</button>
         </form>
+        {tasks.length === 0
+          ? <div style={{ textAlign: "center", padding: "24px 0", color: "rgba(255,255,255,0.25)", fontSize: 14 }}>No tasks yet. Add your first one! ✏️</div>
+          : <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{tasks.slice(0, 5).map(t => <TaskCard key={t.id} task={t} onToggle={() => toggleTask(t.id)} onDelete={() => deleteTask(t.id)} compact />)}</div>
+        }
+      </Card>
+
+      {/* Quick links */}
+      <Card>
+        <div style={s.cardTitle}>Quick Links</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {tasks.slice(0, 5).map((task) => <TaskRow key={task.id} task={task} onToggle={() => toggleTask(task.id)} />)}
+          {[{ icon: "📊", label: "Check college chances", tab: "chancer", color: "#FF6B6B" }, { icon: "💰", label: "Find scholarships", tab: "scholarships", color: "#96CEB4" }, { icon: "💼", label: "Browse internships", tab: "internships", color: "#4ECDC4" }, { icon: "📝", label: "AI study tools", tab: "notes", color: "#FFEAA7" }].map(link => (
+            <motion.button key={link.tab} whileHover={{ x: 4, background: `rgba(${link.color === "#FF6B6B" ? "255,107,107" : link.color === "#96CEB4" ? "150,206,180" : link.color === "#4ECDC4" ? "78,205,196" : "255,234,167"},0.08)` }} onClick={() => setActiveTab(link.tab)}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, color: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 500, textAlign: "left" }}>
+              <span style={{ fontSize: 16 }}>{link.icon}</span>{link.label}
+            </motion.button>
+          ))}
         </div>
-      </Card>
-
-      <Card>
-        <div style={s.cardTitle}>Upcoming Deadlines</div>
-        {INTERNSHIPS.slice(0, 3).map((item) => (
-          <motion.div key={item.co} whileHover={{ x: 4 }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.04)", cursor: "pointer" }}>
-            <div style={{ width: 10, height: 10, borderRadius: "50%", flexShrink: 0, background: item.color }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{item.co}</div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{item.role}</div>
-            </div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{item.deadline}</div>
-          </motion.div>
-        ))}
-      </Card>
-
-      <Card>
-        <div style={s.cardTitle}>Top Scholarship Matches</div>
-        {SCHOLARSHIPS.slice(0, 3).map((sc) => (
-          <div key={sc.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{sc.name}</div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{sc.amount}</div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ width: 60, height: 6, borderRadius: 100, background: sc.match > 90 ? "#96CEB4" : "#4ECDC4" }} />
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#96CEB4" }}>{sc.match}%</span>
-            </div>
-          </div>
-        ))}
       </Card>
     </div>
   );
@@ -376,135 +403,395 @@ function HomeTab({ tasks, toggleTask, progress, completedTasks, pomodoroMin, pom
 
 // ─── PLANNER TAB ─────────────────────────────────────────────────────────────
 
-function PlannerTab({ tasks, toggleTask, newTask, setNewTask, addTask }: {
-  tasks: Task[]; toggleTask: (id: number) => void;
+function PlannerTab({ tasks, toggleTask, deleteTask, newTask, setNewTask, addTask, setTasks }: {
+  tasks: Task[]; toggleTask: (id: string) => void; deleteTask: (id: string) => void;
   newTask: string; setNewTask: (v: string) => void; addTask: (e: React.FormEvent) => void;
+  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
 }) {
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const hours = ["8 AM", "9 AM", "10 AM", "11 AM", "12 PM", "1 PM", "2 PM", "3 PM", "4 PM"];
-  const events = [
-    { day: 0, hour: 0, title: "AP Chem", color: "#FF6B6B" },
-    { day: 1, hour: 2, title: "SAT Prep", color: "#4ECDC4" },
-    { day: 2, hour: 1, title: "Study Group", color: "#45B7D1" },
-    { day: 3, hour: 3, title: "College Essay", color: "#96CEB4" },
-    { day: 4, hour: 0, title: "Club Meeting", color: "#FFEAA7" },
+  const [view, setView] = useState<"board" | "list">("board");
+
+  async function updateField(id: string, field: "priority" | "due", value: string) {
+    await supabase.from("tasks").update({ [field]: value }).eq("id", id);
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
+  }
+
+  const groups = {
+    high: tasks.filter(t => t.priority === "high" && !t.done),
+    medium: tasks.filter(t => t.priority === "medium" && !t.done),
+    low: tasks.filter(t => t.priority === "low" && !t.done),
+    done: tasks.filter(t => t.done),
+  };
+
+  const stats = [
+    { label: "Total", val: tasks.length, color: "#fff" },
+    { label: "Completed", val: groups.done.length, color: "#4ECDC4" },
+    { label: "High Priority", val: groups.high.length, color: "#FF6B6B" },
+    { label: "Due Today", val: tasks.filter(t => t.due === "Today" && !t.done).length, color: "#FFEAA7" },
   ];
 
   return (
-    <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
-      <Card style={{ flex: 1 }}>
-        <div style={s.cardTitle}>Weekly Schedule</div>
-        <div style={{ display: "grid", gridTemplateColumns: "60px repeat(7, 1fr)", gap: 2, overflowX: "auto" as const }}>
-          <div />
-          {days.map((d) => (
-            <div key={d} style={{ textAlign: "center" as const, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)", padding: "8px 0" }}>{d}</div>
-          ))}
-          {hours.map((hour, hi) => ([
-            <div key={`hour-${hi}`} style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", padding: "8px 4px", textAlign: "right" as const }}>{hour}</div>,
-            ...days.map((d, di) => {
-              const event = events.find((e) => e.day === di && e.hour === hi);
-              return (
-                <motion.div key={`${d}-${hour}`} whileHover={{ scale: 1.05 }}
-                  style={{ height: 40, borderRadius: 6, position: "relative" as const, cursor: "pointer", background: event ? event.color + "22" : "transparent", border: event ? `1px solid ${event.color}66` : "1px solid rgba(255,255,255,0.04)" }}>
-                  {event && <div style={{ fontSize: 10, padding: "4px 6px", fontWeight: 600, color: event.color }}>{event.title}</div>}
-                </motion.div>
-              );
-            })
-          ]))}
-        </div>
-      </Card>
-      <div style={{ width: 320 }}>
+    <div style={{ display: "flex", gap: 24 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" as const, gap: 16 }}>
+        {/* Add + view toggle */}
         <Card>
-          <div style={s.cardTitle}>All Tasks</div>
-          <form onSubmit={addTask} style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-            <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="New task..." style={s.taskInput} />
-            <button type="submit" style={s.addBtn}>+</button>
-          </form>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {tasks.map((task) => <TaskRow key={task.id} task={task} onToggle={() => toggleTask(task.id)} />)}
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <form onSubmit={addTask} style={{ display: "flex", gap: 8, flex: 1 }}>
+              <input value={newTask} onChange={e => setNewTask(e.target.value)} placeholder="Add a new task..." style={{ ...s.taskInput, fontSize: 15, padding: "12px 16px" }} />
+              <button type="submit" style={s.addBtn}>+</button>
+            </form>
+            <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 4 }}>
+              {(["board", "list"] as const).map(v => (
+                <button key={v} onClick={() => setView(v)} style={{ padding: "6px 14px", borderRadius: 8, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", background: view === v ? "rgba(255,255,255,0.12)" : "transparent", color: view === v ? "#fff" : "rgba(255,255,255,0.35)" }}>
+                  {v === "board" ? "⬜ Board" : "📋 List"}
+                </button>
+              ))}
+            </div>
           </div>
+        </Card>
+
+        {view === "board" ? (
+          /* KANBAN BOARD */
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+            {(["high", "medium", "low"] as const).map(priority => {
+              const cfg = PRIORITY_CONFIG[priority];
+              return (
+                <div key={priority} style={{ background: cfg.bg, border: `1px solid ${cfg.border}`, borderRadius: 20, padding: 20 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                    <span>{cfg.emoji}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: cfg.color }}>{cfg.label} Priority</span>
+                    <span style={{ marginLeft: "auto", fontSize: 12, padding: "2px 8px", background: `${cfg.color}22`, borderRadius: 100, color: cfg.color }}>{groups[priority].length}</span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
+                    {groups[priority].map(task => <TaskCard key={task.id} task={task} onToggle={() => toggleTask(task.id)} onDelete={() => deleteTask(task.id)} onDueChange={v => updateField(task.id, "due", v)} onPriorityChange={v => updateField(task.id, "priority", v)} />)}
+                    {groups[priority].length === 0 && <div style={{ textAlign: "center", padding: "20px 0", fontSize: 13, color: "rgba(255,255,255,0.2)" }}>No tasks</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          /* LIST VIEW */
+          <div style={{ display: "flex", flexDirection: "column" as const, gap: 12 }}>
+            {(["high", "medium", "low", "done"] as const).map(priority => groups[priority].length > 0 && (
+              <Card key={priority}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                  {priority !== "done" && <span>{PRIORITY_CONFIG[priority].emoji}</span>}
+                  <span style={{ fontSize: 13, fontWeight: 700, color: priority === "done" ? "#4ECDC4" : PRIORITY_CONFIG[priority].color }}>
+                    {priority === "done" ? "✅ Completed" : `${PRIORITY_CONFIG[priority].label} Priority`}
+                  </span>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginLeft: 4 }}>({groups[priority].length})</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column" as const, gap: 6 }}>
+                  {groups[priority].map(task => (
+                    <TaskCard key={task.id} task={task} onToggle={() => toggleTask(task.id)} onDelete={() => deleteTask(task.id)} onDueChange={v => updateField(task.id, "due", v)} onPriorityChange={v => updateField(task.id, "priority", v)} />
+                  ))}
+                </div>
+              </Card>
+            ))}
+            {tasks.length === 0 && (
+              <Card style={{ textAlign: "center", padding: 48 }}>
+                <div style={{ fontSize: 44, marginBottom: 12 }}>✏️</div>
+                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>No tasks yet</div>
+                <div style={{ fontSize: 14, color: "rgba(255,255,255,0.3)" }}>Add your first task above</div>
+              </Card>
+            )}
+          </div>
+        )}
+
+        {/* Completed (board view) */}
+        {view === "board" && groups.done.length > 0 && (
+          <Card>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#4ECDC4", marginBottom: 12 }}>✅ Completed ({groups.done.length})</div>
+            <div style={{ display: "flex", flexDirection: "column" as const, gap: 6 }}>
+              {groups.done.map(task => <TaskCard key={task.id} task={task} onToggle={() => toggleTask(task.id)} onDelete={() => deleteTask(task.id)} compact />)}
+            </div>
+          </Card>
+        )}
+      </div>
+
+      {/* Stats sidebar */}
+      <div style={{ width: 220, flexShrink: 0 }}>
+        <Card>
+          <div style={s.cardTitle}>📊 Stats</div>
+          {stats.map(stat => (
+            <div key={stat.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>{stat.label}</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: stat.color }}>{stat.val}</span>
+            </div>
+          ))}
+          {tasks.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Completion rate</div>
+              <div style={{ height: 6, background: "rgba(255,255,255,0.07)", borderRadius: 100, overflow: "hidden" }}>
+                <motion.div animate={{ width: `${tasks.length === 0 ? 0 : (groups.done.length / tasks.length) * 100}%` }} style={{ height: "100%", background: "linear-gradient(135deg,#4ECDC4,#96CEB4)", borderRadius: 100 }} />
+              </div>
+            </div>
+          )}
         </Card>
       </div>
     </div>
   );
 }
 
+// ─── TASK CARD COMPONENT ─────────────────────────────────────────────────────
+
+function TaskCard({ task, onToggle, onDelete, onDueChange, onPriorityChange, compact = false }: {
+  task: Task; onToggle: () => void; onDelete: () => void;
+  onDueChange?: (v: string) => void; onPriorityChange?: (v: string) => void; compact?: boolean;
+}) {
+  const [showMenu, setShowMenu] = useState(false);
+  const cfg = PRIORITY_CONFIG[task.priority];
+  const dueConfig = DUE_OPTIONS.find(d => d.value === task.due) || DUE_OPTIONS[2];
+
+  if (compact) return (
+    <motion.div whileHover={{ x: 2 }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: "rgba(255,255,255,0.03)", borderRadius: 12, opacity: task.done ? 0.5 : 1 }}>
+      <motion.div whileTap={{ scale: 0.8 }} onClick={onToggle} style={{ width: 18, height: 18, borderRadius: 6, border: `2px solid ${task.done ? "#4ECDC4" : "rgba(255,255,255,0.2)"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer", background: task.done ? "#4ECDC4" : "transparent" }}>
+        {task.done && <span style={{ fontSize: 9, color: "#000" }}>✓</span>}
+      </motion.div>
+      <span style={{ flex: 1, fontSize: 13, textDecoration: task.done ? "line-through" : "none", color: task.done ? "rgba(255,255,255,0.3)" : "#fff" }}>{task.text}</span>
+      <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 100, background: dueConfig.bg, color: dueConfig.color, fontWeight: 600 }}>{task.due}</span>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color, flexShrink: 0 }} />
+      <button onClick={onDelete} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.15)", cursor: "pointer", fontSize: 14 }}>×</button>
+    </motion.div>
+  );
+
+  return (
+    <motion.div whileHover={{ y: -1 }} style={{ padding: "12px 14px", background: "rgba(255,255,255,0.04)", borderRadius: 14, border: task.done ? "1px solid rgba(255,255,255,0.04)" : `1px solid ${cfg.border}`, opacity: task.done ? 0.5 : 1, position: "relative" as const }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <motion.div whileTap={{ scale: 0.8 }} onClick={onToggle} style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${task.done ? "#4ECDC4" : cfg.color}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer", background: task.done ? "#4ECDC4" : `${cfg.color}18`, marginTop: 1 }}>
+          {task.done && <span style={{ fontSize: 10, color: "#000" }}>✓</span>}
+        </motion.div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 500, textDecoration: task.done ? "line-through" : "none", color: task.done ? "rgba(255,255,255,0.3)" : "#fff", marginBottom: 8, lineHeight: 1.4 }}>{task.text}</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
+            {/* Priority badge — clickable */}
+            {onPriorityChange && (
+              <div style={{ position: "relative" as const }}>
+                <motion.button whileHover={{ scale: 1.05 }} onClick={() => setShowMenu(prev => !prev)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 100, border: `1px solid ${cfg.border}`, background: cfg.bg, color: cfg.color, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  {cfg.emoji} {cfg.label}
+                </motion.button>
+                <AnimatePresence>
+                  {showMenu && (
+                    <motion.div initial={{ opacity: 0, y: 4, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} style={{ position: "absolute" as const, top: "calc(100% + 6px)", left: 0, zIndex: 100, background: "#1A1A24", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, padding: 6, display: "flex", flexDirection: "column" as const, gap: 2, minWidth: 140, boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+                      {(Object.entries(PRIORITY_CONFIG) as [Task["priority"], typeof PRIORITY_CONFIG.high][]).map(([key, c]) => (
+                        <motion.button key={key} whileHover={{ background: c.bg }} onClick={() => { onPriorityChange(key); setShowMenu(false); }}
+                          style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, border: "none", background: task.priority === key ? c.bg : "transparent", color: c.color, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                          {c.emoji} {c.label}
+                          {task.priority === key && <span style={{ marginLeft: "auto", fontSize: 11 }}>✓</span>}
+                        </motion.button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+            {/* Due date badge — clickable */}
+            {onDueChange ? (
+              <select value={task.due} onChange={e => onDueChange(e.target.value)}
+                style={{ padding: "3px 8px", borderRadius: 100, border: `1px solid ${dueConfig.bg}`, background: dueConfig.bg, color: dueConfig.color, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", appearance: "none" as const }}>
+                {DUE_OPTIONS.map(d => <option key={d.value} value={d.value}>{d.value}</option>)}
+              </select>
+            ) : (
+              <span style={{ padding: "3px 10px", borderRadius: 100, background: dueConfig.bg, color: dueConfig.color, fontSize: 11, fontWeight: 600 }}>{task.due}</span>
+            )}
+          </div>
+        </div>
+        <button onClick={onDelete} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.15)", cursor: "pointer", fontSize: 16, padding: "0 2px", flexShrink: 0 }}>×</button>
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── NOTES TAB ───────────────────────────────────────────────────────────────
 
-function NotesTab() {
-  const [selected, setSelected] = useState<typeof NOTES[0] | null>(null);
-  const [noteText, setNoteText] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [flashcards, setFlashcards] = useState<{ q: string; a: string }[]>([]);
+function NotesTab({ notes, setNotes, userId }: { notes: NoteSet[]; setNotes: React.Dispatch<React.SetStateAction<NoteSet[]>>; userId: string }) {
+  const [selected, setSelected] = useState<NoteSet | null>(null);
+  const [mode, setMode] = useState<"flashcards" | "practice" | "summary">("flashcards");
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium");
+  const [inputText, setInputText] = useState("");
+  const [loading, setLoading] = useState(false);
   const [activeCard, setActiveCard] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [practiceAnswers, setPracticeAnswers] = useState<Record<number, string>>({});
+  const [summary, setSummary] = useState<{ summary: string[]; keyTerms: { term: string; def: string }[] } | null>(null);
+  const [newTitle, setNewTitle] = useState("");
+  const [newSubject, setNewSubject] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const sampleFlashcards = [
-    { q: "What is the Aufbau principle?", a: "Electrons fill orbitals from lowest to highest energy." },
-    { q: "Define electronegativity", a: "Tendency of an atom to attract electrons in a bond." },
-    { q: "What is Hund's rule?", a: "Electrons occupy empty orbitals before pairing up." },
-  ];
+  async function handleGenerate() {
+    if (!inputText.trim() || !selected) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: inputText, mode, difficulty }) });
+      const data = await res.json();
+      if (mode === "summary") { setSummary(data.result); }
+      else {
+        const updatePayload: Record<string, string> = { content: inputText };
+        if (mode === "flashcards") updatePayload.flashcards = JSON.stringify(data.result);
+        if (mode === "practice") updatePayload.practice_questions = JSON.stringify(data.result);
+        await supabase.from("note_sets").update(updatePayload).eq("id", selected.id);
+        const updated = { ...selected, content: inputText, flashcards: mode === "flashcards" ? data.result : selected.flashcards, practice_questions: mode === "practice" ? data.result : selected.practice_questions };
+        setSelected(updated);
+        setNotes(prev => prev.map(n => n.id === selected.id ? updated : n));
+      }
+      setActiveCard(0); setFlipped(false); setPracticeAnswers({});
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }
 
-  function generateCards() {
-    if (!noteText.trim()) return;
-    setGenerating(true);
-    setTimeout(() => { setFlashcards(sampleFlashcards); setGenerating(false); }, 1800);
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setInputText((ev.target?.result as string) || "");
+    reader.readAsText(file);
+  }
+
+  async function createNoteSet() {
+    if (!newTitle.trim()) return;
+    const { data } = await supabase.from("note_sets").insert({ user_id: userId, title: newTitle, subject: newSubject || "General", content: "", flashcards: "[]", practice_questions: "[]" }).select().single();
+    if (data) { const nn = { ...data, flashcards: [], practice_questions: [] }; setNotes(prev => [nn, ...prev]); setSelected(nn); setShowCreate(false); setNewTitle(""); setNewSubject(""); }
+  }
+
+  async function deleteNote(id: string) {
+    await supabase.from("note_sets").delete().eq("id", id);
+    setNotes(prev => prev.filter(n => n.id !== id));
+    if (selected?.id === id) setSelected(null);
   }
 
   return (
-    <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column" as const, gap: 20 }}>
+    <div style={{ display: "flex", gap: 24 }}>
+      {/* Sidebar */}
+      <div style={{ width: 260, flexShrink: 0 }}>
         <Card>
-          <div style={s.cardTitle}>📚 My Note Sets</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16 }}>
-            {NOTES.map((note) => (
-              <motion.div key={note.title} whileHover={{ y: -4 }} onClick={() => setSelected(note)}
-                style={{ padding: 20, background: "rgba(255,255,255,0.04)", borderRadius: 16, cursor: "pointer", border: selected?.title === note.title ? "1px solid rgba(255,107,107,0.5)" : "1px solid rgba(255,255,255,0.08)" }}>
-                <div style={{ fontSize: 24, marginBottom: 12 }}>📄</div>
-                <div style={{ fontWeight: 700, marginBottom: 4 }}>{note.title}</div>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>{note.subject}</div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
-                  <span>🃏 {note.cards} cards</span><span>{note.updated}</span>
-                </div>
-              </motion.div>
-            ))}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={s.cardTitle}>📚 Notes</div>
+            <motion.button whileHover={{ scale: 1.05 }} onClick={() => setShowCreate(!showCreate)} style={{ padding: "5px 12px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 100, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ New</motion.button>
           </div>
-        </Card>
-        <Card>
-          <div style={s.cardTitle}>✨ AI Flashcard Generator</div>
-          <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Paste your notes here..."
-            style={{ width: "100%", height: 140, padding: "14px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, color: "#fff", fontSize: 14, resize: "vertical", fontFamily: "inherit", outline: "none", boxSizing: "border-box" as const, marginBottom: 16 }} />
-          <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={generateCards} disabled={generating}
-            style={{ width: "100%", padding: "14px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 14, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-            {generating ? "✨ Generating..." : "✨ Generate Flashcards"}
-          </motion.button>
+          {showCreate && (
+            <div style={{ marginBottom: 14, padding: 12, background: "rgba(255,255,255,0.04)", borderRadius: 14 }}>
+              <input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Title..." style={{ ...s.taskInput, width: "100%", marginBottom: 6, boxSizing: "border-box" as const }} />
+              <input value={newSubject} onChange={e => setNewSubject(e.target.value)} placeholder="Subject..." style={{ ...s.taskInput, width: "100%", marginBottom: 8, boxSizing: "border-box" as const }} />
+              <div style={{ display: "flex", gap: 6 }}>
+                <motion.button whileTap={{ scale: 0.97 }} onClick={createNoteSet} style={{ flex: 1, padding: "7px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Create</motion.button>
+                <button onClick={() => setShowCreate(false)} style={{ padding: "7px 10px", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>✕</button>
+              </div>
+            </div>
+          )}
+          {notes.length === 0
+            ? <div style={{ textAlign: "center", padding: "20px 0", color: "rgba(255,255,255,0.25)", fontSize: 12 }}>No notes yet</div>
+            : notes.map(note => (
+              <div key={note.id} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                <motion.div whileHover={{ x: 2 }} onClick={() => { setSelected(note); setInputText(note.content || ""); setSummary(null); }}
+                  style={{ flex: 1, padding: "10px 12px", background: selected?.id === note.id ? "rgba(255,107,107,0.1)" : "rgba(255,255,255,0.03)", border: selected?.id === note.id ? "1px solid rgba(255,107,107,0.35)" : "1px solid rgba(255,255,255,0.06)", borderRadius: 12, cursor: "pointer" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{note.title}</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>{note.subject} · {(note.flashcards || []).length} cards</div>
+                </motion.div>
+                <button onClick={() => deleteNote(note.id)} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.2)", cursor: "pointer", fontSize: 16, flexShrink: 0, padding: "0 4px" }}>×</button>
+              </div>
+            ))
+          }
         </Card>
       </div>
-      <div style={{ width: 340 }}>
-        {flashcards.length > 0 ? (
-          <Card>
-            <div style={s.cardTitle}>Flashcards ({flashcards.length})</div>
-            <div style={{ perspective: 1000, marginBottom: 16 }}>
-              <motion.div onClick={() => setFlipped((f) => !f)} animate={{ rotateY: flipped ? 180 : 0 }} transition={{ duration: 0.4 }}
-                style={{ background: "linear-gradient(135deg,rgba(255,107,107,0.1),rgba(78,205,196,0.1))", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, minHeight: 180, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                <div style={{ padding: 24, textAlign: "center" as const }}>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 16 }}>{flipped ? "ANSWER" : "QUESTION"}</div>
-                  <div style={{ fontSize: 18, fontWeight: 600, lineHeight: 1.5 }}>{flipped ? flashcards[activeCard].a : flashcards[activeCard].q}</div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginTop: 20 }}>Tap to flip</div>
-                </div>
-              </motion.div>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 8px" }}>
-              <button onClick={() => { setActiveCard((c) => Math.max(0, c - 1)); setFlipped(false); }} style={{ background: "rgba(255,255,255,0.07)", border: "none", borderRadius: 10, color: "#fff", padding: "8px 16px", cursor: "pointer", fontSize: 16, fontFamily: "inherit" }}>←</button>
-              <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 14 }}>{activeCard + 1} / {flashcards.length}</span>
-              <button onClick={() => { setActiveCard((c) => Math.min(flashcards.length - 1, c + 1)); setFlipped(false); }} style={{ background: "rgba(255,255,255,0.07)", border: "none", borderRadius: 10, color: "#fff", padding: "8px 16px", cursor: "pointer", fontSize: 16, fontFamily: "inherit" }}>→</button>
-            </div>
+
+      {/* Main content */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" as const, gap: 16 }}>
+        {!selected ? (
+          <Card style={{ textAlign: "center", padding: 60 }}>
+            <div style={{ fontSize: 48, marginBottom: 14 }}>📝</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>Select or create a note set</div>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.35)", lineHeight: 1.7 }}>Upload your notes → AI generates flashcards, practice questions & summaries</div>
           </Card>
         ) : (
-          <Card style={{ textAlign: "center", padding: 40 }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🃏</div>
-            <div style={{ fontSize: 16, color: "rgba(255,255,255,0.4)" }}>Generate flashcards from your notes with AI</div>
-          </Card>
+          <>
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                <div style={s.cardTitle}>📄 {selected.title}</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {(["flashcards", "practice", "summary"] as const).map(m => (
+                    <motion.button key={m} whileHover={{ scale: 1.04 }} onClick={() => setMode(m)} style={{ padding: "5px 12px", border: "none", borderRadius: 100, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", background: mode === m ? "linear-gradient(135deg,#FF6B6B,#FF8E53)" : "rgba(255,255,255,0.06)", color: mode === m ? "#fff" : "rgba(255,255,255,0.45)" }}>
+                      {m === "flashcards" ? "🃏 Cards" : m === "practice" ? "📝 Quiz" : "📋 Summary"}
+                    </motion.button>
+                  ))}
+                </div>
+              </div>
+              {mode === "practice" && (
+                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", alignSelf: "center" }}>Difficulty:</span>
+                  {(["easy", "medium", "hard"] as const).map(d => (
+                    <motion.button key={d} whileHover={{ scale: 1.05 }} onClick={() => setDifficulty(d)} style={{ padding: "4px 12px", border: "none", borderRadius: 100, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", background: difficulty === d ? (d === "easy" ? "#96CEB4" : d === "medium" ? "#FFEAA7" : "#FF6B6B") : "rgba(255,255,255,0.06)", color: difficulty === d ? "#000" : "rgba(255,255,255,0.45)" }}>
+                      {d.charAt(0).toUpperCase() + d.slice(1)}
+                    </motion.button>
+                  ))}
+                </div>
+              )}
+              <textarea value={inputText} onChange={e => setInputText(e.target.value)} placeholder="Paste your notes here, or upload a .txt or .md file..." style={{ width: "100%", height: 150, padding: 14, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 14, color: "#fff", fontSize: 13, resize: "vertical", fontFamily: "inherit", outline: "none", boxSizing: "border-box" as const, marginBottom: 10 }} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <input ref={fileRef} type="file" accept=".txt,.md" onChange={handleFileUpload} style={{ display: "none" }} />
+                <motion.button whileHover={{ scale: 1.03 }} onClick={() => fileRef.current?.click()} style={{ padding: "10px 16px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>📎 Upload</motion.button>
+                <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={handleGenerate} disabled={loading || !inputText.trim()} style={{ flex: 1, padding: "10px", background: loading || !inputText.trim() ? "rgba(255,255,255,0.06)" : "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 12, color: "#fff", fontSize: 14, fontWeight: 700, cursor: loading ? "wait" : "pointer", fontFamily: "inherit" }}>
+                  {loading ? "✨ Generating..." : `✨ Generate ${mode === "flashcards" ? "Flashcards" : mode === "practice" ? "Practice Quiz" : "Summary"}`}
+                </motion.button>
+              </div>
+            </Card>
+
+            {mode === "flashcards" && (selected.flashcards || []).length > 0 && (
+              <Card>
+                <div style={s.cardTitle}>🃏 Flashcards ({selected.flashcards.length})</div>
+                <motion.div onClick={() => setFlipped(f => !f)} animate={{ rotateY: flipped ? 180 : 0 }} transition={{ duration: 0.35 }} style={{ background: "linear-gradient(135deg,rgba(255,107,107,0.08),rgba(78,205,196,0.08))", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 18, minHeight: 160, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", marginBottom: 14 }}>
+                  <div style={{ padding: 24, textAlign: "center" as const }}>
+                    <div style={{ fontSize: 10, letterSpacing: "0.12em", color: "rgba(255,255,255,0.3)", marginBottom: 10 }}>{flipped ? "ANSWER" : "QUESTION"} · {activeCard + 1}/{selected.flashcards.length}</div>
+                    <div style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.6 }}>{flipped ? selected.flashcards[activeCard]?.a : selected.flashcards[activeCard]?.q}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", marginTop: 14 }}>Click to flip</div>
+                  </div>
+                </motion.div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <button onClick={() => { setActiveCard(c => Math.max(0, c - 1)); setFlipped(false); }} style={{ background: "rgba(255,255,255,0.07)", border: "none", borderRadius: 10, color: "#fff", padding: "7px 18px", cursor: "pointer", fontSize: 16, fontFamily: "inherit" }}>←</button>
+                  <div style={{ display: "flex", gap: 4 }}>{selected.flashcards.map((_, i) => <div key={i} onClick={() => { setActiveCard(i); setFlipped(false); }} style={{ width: 7, height: 7, borderRadius: "50%", cursor: "pointer", background: i === activeCard ? "#FF6B6B" : "rgba(255,255,255,0.12)" }} />)}</div>
+                  <button onClick={() => { setActiveCard(c => Math.min(selected.flashcards.length - 1, c + 1)); setFlipped(false); }} style={{ background: "rgba(255,255,255,0.07)", border: "none", borderRadius: 10, color: "#fff", padding: "7px 18px", cursor: "pointer", fontSize: 16, fontFamily: "inherit" }}>→</button>
+                </div>
+              </Card>
+            )}
+
+            {mode === "practice" && (selected.practice_questions || []).length > 0 && (
+              <Card>
+                <div style={s.cardTitle}>📝 Practice Quiz — {difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}</div>
+                {selected.practice_questions.map((q, qi) => (
+                  <div key={qi} style={{ padding: 18, background: "rgba(255,255,255,0.03)", borderRadius: 14, marginBottom: 12 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 15 }}>Q{qi + 1}. {q.question}</div>
+                    <div style={{ display: "flex", flexDirection: "column" as const, gap: 7 }}>
+                      {q.options.map((opt, oi) => {
+                        const answered = practiceAnswers[qi]; const isCorrect = opt === q.answer; const isSelected = opt === answered;
+                        return (
+                          <motion.button key={oi} whileHover={!answered ? { x: 4 } : {}} onClick={() => !answered && setPracticeAnswers(p => ({ ...p, [qi]: opt }))}
+                            style={{ padding: "10px 14px", border: `1px solid ${answered ? (isCorrect ? "#96CEB4" : isSelected ? "#FF6B6B" : "rgba(255,255,255,0.05)") : "rgba(255,255,255,0.09)"}`, borderRadius: 10, background: answered ? (isCorrect ? "rgba(150,206,180,0.12)" : isSelected ? "rgba(255,107,107,0.12)" : "transparent") : "rgba(255,255,255,0.03)", color: "#fff", cursor: answered ? "default" : "pointer", fontFamily: "inherit", fontSize: 13, textAlign: "left" as const }}>
+                            {opt}
+                          </motion.button>
+                        );
+                      })}
+                    </div>
+                    {practiceAnswers[qi] && <div style={{ marginTop: 10, padding: "10px 12px", background: "rgba(78,205,196,0.07)", borderRadius: 10, fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>{practiceAnswers[qi] === q.answer ? "✅ Correct! " : `❌ Correct: ${q.answer}. `}{q.explanation}</div>}
+                  </div>
+                ))}
+              </Card>
+            )}
+
+            {mode === "summary" && summary && (
+              <Card>
+                <div style={s.cardTitle}>📋 Summary</div>
+                {summary.summary?.map((point, i) => <div key={i} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}><span style={{ color: "#FF6B6B", fontWeight: 700 }}>•</span><span style={{ fontSize: 14, lineHeight: 1.7 }}>{point}</span></div>)}
+                {(summary.keyTerms || []).length > 0 && (
+                  <>
+                    <div style={{ ...s.cardTitle, marginTop: 20, marginBottom: 12 }}>🔑 Key Terms</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      {summary.keyTerms.map((term, i) => <div key={i} style={{ padding: 12, background: "rgba(255,255,255,0.04)", borderRadius: 12 }}><div style={{ fontWeight: 700, marginBottom: 4, color: "#4ECDC4", fontSize: 13 }}>{term.term}</div><div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>{term.def}</div></div>)}
+                    </div>
+                  </>
+                )}
+              </Card>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -513,37 +800,73 @@ function NotesTab() {
 
 // ─── COLLEGE TAB ─────────────────────────────────────────────────────────────
 
-function CollegeTab() {
+function CollegeTab({ colleges, setColleges, userId }: { colleges: CollegeEntry[]; setColleges: React.Dispatch<React.SetStateAction<CollegeEntry[]>>; userId: string }) {
+  const [newCollege, setNewCollege] = useState("");
+  const STATUS_CONFIG = { tracking: { color: "#4ECDC4", label: "Tracking" }, applied: { color: "#FFEAA7", label: "Applied" }, accepted: { color: "#96CEB4", label: "Accepted ✓" } };
+
+  async function addCollege(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newCollege.trim()) return;
+    const { data } = await supabase.from("user_colleges").insert({ user_id: userId, college_name: newCollege.trim(), status: "tracking", chance: 0 }).select().single();
+    if (data) setColleges(prev => [...prev, data]);
+    setNewCollege("");
+  }
+
+  async function updateStatus(id: string, status: string) {
+    await supabase.from("user_colleges").update({ status }).eq("id", id);
+    setColleges(prev => prev.map(c => c.id === id ? { ...c, status } : c));
+  }
+
+  async function removeCollege(id: string) {
+    await supabase.from("user_colleges").delete().eq("id", id);
+    setColleges(prev => prev.filter(c => c.id !== id));
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column" as const, gap: 24 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24 }}>
-        <StatCard label="Schools Tracking" val="12" icon="🏫" color="#FF6B6B" />
-        <StatCard label="Applications Done" val="3" icon="✅" color="#4ECDC4" />
-        <StatCard label="Essays Drafted" val="7" icon="✏️" color="#96CEB4" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16 }}>
+        {[{ label: "Tracking", val: colleges.filter(c => c.status === "tracking").length, icon: "👁", color: "#4ECDC4" }, { label: "Applied", val: colleges.filter(c => c.status === "applied").length, icon: "📬", color: "#FFEAA7" }, { label: "Accepted", val: colleges.filter(c => c.status === "accepted").length, icon: "🎉", color: "#96CEB4" }, { label: "Chanced", val: colleges.filter(c => c.chance > 0).length, icon: "📊", color: "#FF6B6B" }].map(stat => (
+          <Card key={stat.label} style={{ textAlign: "center", padding: "20px 16px" }}>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>{stat.icon}</div>
+            <div style={{ fontSize: 30, fontWeight: 900, color: stat.color }}>{stat.val}</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{stat.label}</div>
+          </Card>
+        ))}
       </div>
       <Card>
-        <div style={s.cardTitle}>My College List</div>
-        <div style={{ display: "flex", flexDirection: "column" as const, gap: 16 }}>
-          {COLLEGES.map((col, i) => (
-            <motion.div key={col.name} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }} whileHover={{ x: 4 }}
-              style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 16px", background: "rgba(255,255,255,0.03)", borderRadius: 14, cursor: "pointer" }}>
-              <div style={{ fontSize: 28 }}>{col.emoji}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>{col.name}</div>
-                <div style={{ height: 8, background: "rgba(255,255,255,0.08)", borderRadius: 100, overflow: "hidden" }}>
-                  <motion.div initial={{ width: 0 }} animate={{ width: `${col.chance}%` }} transition={{ delay: i * 0.05 + 0.3, duration: 0.8 }} style={{ height: "100%", borderRadius: 100, background: col.color }} />
-                </div>
-              </div>
-              <div style={{ textAlign: "right" as const }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: col.color }}>{col.chance}%</div>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>chance</div>
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 700, minWidth: 30, textAlign: "right" as const, color: col.trend.startsWith("+") ? "#96CEB4" : col.trend === "0" ? "rgba(255,255,255,0.4)" : "#FF6B6B" }}>
-                {col.trend === "0" ? "—" : col.trend}
-              </div>
-            </motion.div>
-          ))}
-        </div>
+        <div style={s.cardTitle}>Add a School</div>
+        <form onSubmit={addCollege} style={{ display: "flex", gap: 8 }}>
+          <input value={newCollege} onChange={e => setNewCollege(e.target.value)} placeholder="e.g. MIT, Stanford, UCLA..." style={{ ...s.taskInput, flex: 1, fontSize: 15 }} />
+          <motion.button whileHover={{ scale: 1.03 }} type="submit" style={{ padding: "10px 22px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}>Add</motion.button>
+        </form>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", marginTop: 6 }}>Visit the Chancer tab to calculate your real admission odds.</div>
+      </Card>
+      <Card>
+        <div style={s.cardTitle}>My College List ({colleges.length})</div>
+        {colleges.length === 0 ? <div style={{ textAlign: "center", padding: 40, color: "rgba(255,255,255,0.25)", fontSize: 14 }}>No colleges yet. Add some above!</div> : (
+          <div style={{ display: "flex", flexDirection: "column" as const, gap: 10 }}>
+            {colleges.map((col, i) => {
+              const sc = STATUS_CONFIG[col.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.tracking;
+              return (
+                <motion.div key={col.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                  style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: "rgba(255,255,255,0.03)", borderRadius: 14, border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 12, background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🎓</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, marginBottom: col.chance > 0 ? 6 : 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.college_name}</div>
+                    {col.chance > 0 && <div style={{ height: 5, background: "rgba(255,255,255,0.07)", borderRadius: 100, overflow: "hidden" }}><motion.div animate={{ width: `${col.chance}%` }} transition={{ duration: 0.8 }} style={{ height: "100%", borderRadius: 100, background: "linear-gradient(135deg,#FF6B6B,#4ECDC4)" }} /></div>}
+                  </div>
+                  {col.chance > 0 && <div style={{ fontWeight: 800, fontSize: 18, color: "#FF6B6B", minWidth: 44, textAlign: "right" as const }}>{Math.round(col.chance)}%</div>}
+                  <select value={col.status} onChange={e => updateStatus(col.id, e.target.value)} style={{ padding: "5px 10px", borderRadius: 100, border: `1px solid ${sc.color}44`, background: `${sc.color}18`, color: sc.color, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", appearance: "none" as const }}>
+                    <option value="tracking">Tracking</option>
+                    <option value="applied">Applied</option>
+                    <option value="accepted">Accepted</option>
+                  </select>
+                  <button onClick={() => removeCollege(col.id)} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.2)", cursor: "pointer", fontSize: 18 }}>×</button>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
       </Card>
     </div>
   );
@@ -553,32 +876,26 @@ function CollegeTab() {
 
 function ScholarshipsTab() {
   const [filter, setFilter] = useState("All");
-  const tags = ["All", "STEM", "Arts", "Leadership", "Need-Based"];
-
+  const [search, setSearch] = useState("");
+  const filtered = SCHOLARSHIP_DATA.filter(sc => (filter === "All" || sc.tags.includes(filter)) && (sc.name.toLowerCase().includes(search.toLowerCase()) || sc.desc.toLowerCase().includes(search.toLowerCase())));
   return (
     <div style={{ display: "flex", flexDirection: "column" as const, gap: 24 }}>
       <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" as const, gap: 16 }}>
-          <div style={s.cardTitle}>Scholarship Matches</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const }}>
-            {tags.map((t) => (
-              <motion.button key={t} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setFilter(t)}
-                style={{ padding: "8px 16px", border: "none", borderRadius: 100, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", background: filter === t ? "linear-gradient(135deg,#FF6B6B,#FF8E53)" : "rgba(255,255,255,0.06)", color: filter === t ? "#fff" : "rgba(255,255,255,0.5)" }}>
-                {t}
-              </motion.button>
-            ))}
-          </div>
+        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap" as const, gap: 12, marginBottom: 14 }}>
+          <div style={s.cardTitle}>🎓 Scholarships</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>{["All", "Need-Based", "STEM", "Arts", "Leadership"].map(t => <motion.button key={t} whileHover={{ scale: 1.05 }} onClick={() => setFilter(t)} style={{ padding: "6px 14px", border: "none", borderRadius: 100, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", background: filter === t ? "linear-gradient(135deg,#FF6B6B,#FF8E53)" : "rgba(255,255,255,0.06)", color: filter === t ? "#fff" : "rgba(255,255,255,0.45)" }}>{t}</motion.button>)}</div>
         </div>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search scholarships..." style={{ ...s.taskInput, width: "100%", boxSizing: "border-box" as const }} />
       </Card>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 20 }}>
-        {SCHOLARSHIPS.map((sc, i) => (
-          <motion.div key={sc.name} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }} whileHover={{ y: -6 }}
-            style={{ padding: 28, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 20, cursor: "pointer" }}>
-            <div style={{ display: "inline-block", padding: "4px 12px", background: "rgba(150,206,180,0.15)", borderRadius: 100, fontSize: 12, fontWeight: 700, color: "#96CEB4", marginBottom: 16 }}>{sc.match}% match</div>
-            <h3 style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>{sc.name}</h3>
-            <div style={{ fontSize: 28, fontWeight: 900, color: "#96CEB4", marginBottom: 12 }}>{sc.amount}</div>
-            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 20 }}>Deadline: {sc.deadline}</div>
-            <motion.button whileHover={{ scale: 1.04 }} style={s.applyBtn}>Apply Now →</motion.button>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 18 }}>
+        {filtered.map((sc, i) => (
+          <motion.div key={sc.name} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} whileHover={{ y: -5 }} style={{ padding: 24, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 18, display: "flex", flexDirection: "column" as const }}>
+            <div style={{ display: "flex", gap: 5, marginBottom: 10 }}>{sc.tags.map(tag => <span key={tag} style={{ padding: "2px 9px", background: "rgba(150,206,180,0.12)", borderRadius: 100, fontSize: 10, fontWeight: 700, color: "#96CEB4" }}>{tag}</span>)}</div>
+            <h3 style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>{sc.name}</h3>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 10, flex: 1, lineHeight: 1.6 }}>{sc.desc}</p>
+            <div style={{ fontSize: 24, fontWeight: 900, color: "#96CEB4", marginBottom: 4 }}>{sc.amount}</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 16 }}>📅 {sc.deadline}</div>
+            <motion.a href={sc.url} target="_blank" rel="noopener noreferrer" whileHover={{ scale: 1.03 }} style={{ ...s.applyBtn, textDecoration: "none", textAlign: "center" as const, display: "block" }}>Apply Now →</motion.a>
           </motion.div>
         ))}
       </div>
@@ -589,151 +906,591 @@ function ScholarshipsTab() {
 // ─── INTERNSHIPS TAB ─────────────────────────────────────────────────────────
 
 function InternshipsTab() {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("All");
+  const filtered = INTERNSHIP_DATA.filter(item => (filter === "All" || item.tag === filter) && (item.co.toLowerCase().includes(search.toLowerCase()) || item.role.toLowerCase().includes(search.toLowerCase())));
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20 }}>
-      {INTERNSHIPS.map((item, i) => (
-        <motion.div key={item.co} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }} whileHover={{ y: -6 }}
-          style={{ padding: 28, background: "rgba(255,255,255,0.03)", borderRadius: 20, border: "1px solid rgba(255,255,255,0.06)", borderTop: `3px solid ${item.color}` }}>
-          <div style={{ display: "inline-block", padding: "4px 12px", borderRadius: 100, fontSize: 12, fontWeight: 700, marginBottom: 16, background: item.color + "22", color: item.color }}>{item.tag}</div>
-          <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>{item.co}</div>
-          <div style={{ fontSize: 15, color: "rgba(255,255,255,0.55)", marginBottom: 12 }}>{item.role}</div>
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", marginBottom: 16 }}>📅 Deadline: {item.deadline}</div>
-          <motion.button whileHover={{ scale: 1.04 }} style={s.applyBtn}>Learn More →</motion.button>
-        </motion.div>
-      ))}
+    <div style={{ display: "flex", flexDirection: "column" as const, gap: 24 }}>
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap" as const, gap: 12, marginBottom: 14 }}>
+          <div style={s.cardTitle}>💼 Internships</div>
+          <div style={{ display: "flex", gap: 6 }}>{["All", "CS", "Research", "STEM", "Finance"].map(t => <motion.button key={t} whileHover={{ scale: 1.05 }} onClick={() => setFilter(t)} style={{ padding: "6px 14px", border: "none", borderRadius: 100, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", background: filter === t ? "linear-gradient(135deg,#FF6B6B,#FF8E53)" : "rgba(255,255,255,0.06)", color: filter === t ? "#fff" : "rgba(255,255,255,0.45)" }}>{t}</motion.button>)}</div>
+        </div>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search opportunities..." style={{ ...s.taskInput, width: "100%", boxSizing: "border-box" as const }} />
+      </Card>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 18 }}>
+        {filtered.map((item, i) => (
+          <motion.div key={item.co + item.role} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} whileHover={{ y: -5 }} style={{ padding: 24, background: "rgba(255,255,255,0.03)", borderRadius: 18, border: "1px solid rgba(255,255,255,0.06)", borderTop: `3px solid ${item.color}`, display: "flex", flexDirection: "column" as const }}>
+            <div style={{ display: "inline-block", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 700, marginBottom: 12, background: item.color + "22", color: item.color, alignSelf: "flex-start" }}>{item.tag}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>{item.co}</div>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 10, flex: 1 }}>{item.role}</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginBottom: 16 }}>📅 {item.deadline}</div>
+            <motion.a href={item.url} target="_blank" rel="noopener noreferrer" whileHover={{ scale: 1.03 }} style={{ ...s.applyBtn, textDecoration: "none", textAlign: "center" as const, display: "block" }}>Learn More →</motion.a>
+          </motion.div>
+        ))}
+      </div>
     </div>
   );
 }
 
 // ─── CHANCER TAB ─────────────────────────────────────────────────────────────
 
-function ChancerTab({ gpa, sat }: { gpa: string; sat: string }) {
-  const [localGpa, setLocalGpa] = useState(gpa);
-  const [localSat, setLocalSat] = useState(sat);
-  const [updated, setUpdated] = useState(false);
+const GPA_SCALES = [
+  { label: "4.0 (US Standard)", value: "4.0" },
+  { label: "5.0 (Weighted)", value: "5.0" },
+  { label: "6.0 (Some US schools)", value: "6.0" },
+  { label: "7.0 (Australian/NZ)", value: "7.0" },
+  { label: "9.0 (Indian CGPA)", value: "9.0" },
+  { label: "10.0 (Indian/European)", value: "10.0" },
+  { label: "100 (Percentage)", value: "100" },
+  { label: "12.0 (Some systems)", value: "12.0" },
+];
 
-  function getLabel(chance: number) {
-    if (chance < 15) return { text: "Reach", color: "#FF6B6B" };
-    if (chance < 50) return { text: "Hard Target", color: "#FFEAA7" };
-    if (chance < 75) return { text: "Target", color: "#4ECDC4" };
-    return { text: "Safety", color: "#96CEB4" };
+function ChancerTab({ initialGpa, initialSat, userId, dreamSchools, colleges, setColleges, fullProfile }: {
+  initialGpa: string; initialSat: string; userId: string; dreamSchools: string[]; colleges: CollegeEntry[]; setColleges: React.Dispatch<React.SetStateAction<CollegeEntry[]>>; fullProfile: Profile | null;
+}) {
+  const [studentProfile, setStudentProfile] = useState<StudentProfile>({
+    gpa: initialGpa === "—" ? "" : initialGpa,
+    gpaScale: fullProfile?.gpa_scale || "4.0",
+    gpaType: fullProfile?.gpa_type || "weighted",
+    sat: initialSat === "—" ? "" : initialSat,
+    act: "",
+    apCourses: "",
+    classRank: "",
+    extracurriculars: fullProfile?.extracurriculars || "",
+    leadershipRoles: "",
+    awards: fullProfile?.awards || "",
+    sportsLevel: "None",
+    recLetterStrength: fullProfile?.rec_letter_strength || "Unknown",
+    firstGen: false,
+    legacy: false,
+    state: "",
+    major: "",
+    essayStrength: "Average",
+  });
+  const [schoolInput, setSchoolInput] = useState(dreamSchools.join(", "));
+  const [results, setResults] = useState<Record<string, ChanceResult>>({});
+  const [loading, setLoading] = useState<string | null>(null);
+  const [checkedSchools, setCheckedSchools] = useState<string[]>([]);
+  const [profileStep, setProfileStep] = useState<"academics" | "profile" | "context">("academics");
+
+  function updateProfile(field: keyof StudentProfile, value: string | boolean) {
+    setStudentProfile(prev => ({ ...prev, [field]: value }));
   }
 
-  const chances = COLLEGES.map((c) => ({
-    ...c,
-    chance: Math.min(98, Math.max(3, c.chance + (parseFloat(localGpa) - 3.5) * 10 + (parseInt(localSat) - 1400) * 0.02)),
-  }));
+  // Compute normalized GPA display
+  const scale = parseFloat(studentProfile.gpaScale) || 4.0;
+  const rawGpa = parseFloat(studentProfile.gpa) || 0;
+  const normalizedGpa = scale !== 4.0 && rawGpa > 0 ? ((rawGpa / scale) * 4.0).toFixed(2) : null;
+
+  // ── Inline field errors for chancer form ──────────────────────────────────
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  function isGibberish(raw: string): boolean {
+    const s = raw.toLowerCase().trim();
+    if (!s || s.length < 2) return false;
+    const nonsense = new Set(["idk","idc","idek","idfk","dunno","whatever","hmm","hm","meh","blah","ugh","ok","okay","k","kk","yes","no","nope","nah","na","n/a","none","nothing","lol","lmao","test","hello","hi","hey","stuff","things","random","asdf","qwerty","zxcvb","1234","abcd","aaaa","bbbb","cccc","??","...","---","no idea","not sure","don't know","dont know","i don't know","many","a lot","lots","various","some"]);
+    if (nonsense.has(s)) return true;
+    if (/^(.){3,}$/.test(s)) return true;
+    const runs = ["qwert","werty","asdfg","sdfgh","zxcvb","xcvbn","12345","23456","34567"];
+    if (runs.some(r => s.includes(r))) return true;
+    const letters = s.replace(/[^a-z]/g, "");
+    if (letters.length >= 6 && !/[aeiou]/.test(letters)) return true;
+    return false;
+  }
+
+  function validateField(field: string, value: string): string | null {
+    const v = value.trim();
+    switch (field) {
+      case "gpa": {
+        if (!v) return "GPA is required.";
+        const sc = parseFloat(studentProfile.gpaScale) || 4.0;
+        const num = parseFloat(v);
+        if (isNaN(num) || isGibberish(v)) return "GPA must be a number (e.g. 3.8).";
+        if (num <= 0) return "GPA must be greater than 0.";
+        if (num > sc) return `${num} exceeds your scale of ${sc}. Check your GPA or change the scale.`;
+        if (sc === 4.0 && num > 4.3) return "That's too high for a 4.0 scale. Did you mean a different scale?";
+        if (sc === 100 && num > 100) return "Percentage can't exceed 100.";
+        if (sc === 100 && num < 10) return "That percentage seems very low. Enter your actual grade (e.g. 87).";
+        return null;
+      }
+      case "sat": {
+        if (!v) return null;
+        const skip = /not yet|not taken|haven.t|haven't|no|n\/a|na|tbd|planning|will take|none/i;
+        if (skip.test(v)) return null;
+        const digits = v.replace(/[^0-9]/g, "");
+        if (!digits || isGibberish(v)) return "Enter your SAT score (400–1600), or leave blank.";
+        const num = parseInt(digits);
+        if (num < 400) return "SAT scores start at 400. Leave blank if not taken.";
+        if (num > 1600) return "SAT scores max at 1600.";
+        return null;
+      }
+      case "act": {
+        if (!v) return null;
+        const skip = /not yet|not taken|haven.t|haven't|no|n\/a|na|tbd|planning|will take|none/i;
+        if (skip.test(v)) return null;
+        const digits = v.replace(/[^0-9]/g, "");
+        if (!digits || isGibberish(v)) return "Enter your ACT score (1–36), or leave blank.";
+        const num = parseInt(digits);
+        if (num < 1 || num > 36) return "ACT scores range from 1–36.";
+        return null;
+      }
+      case "extracurriculars": {
+        if (!v) return null;
+        const bad = new Set(["idk","idc","none","nothing","no","nope","nah","na","n/a","idk man","no idea","not sure","don't know","dont know","many","a lot","lots","stuff","things","various","clubs","sports","band","volunteer"]);
+        if (bad.has(v.toLowerCase())) return 'Too vague — be specific, e.g. "Debate team captain (3 yrs), Math club, 200hrs volunteering".';
+        if (isGibberish(v.replace(/\s+/g,""))) return "Please describe your actual activities, not random text.";
+        if (v.length < 5) return "Give a bit more detail, or leave blank.";
+        const single = /^(sports?|music|art|volunteer|club|band|team|dance|debate|chess|math|science)\.?$/i;
+        if (single.test(v)) return `"${v}" is too vague. Try "Debate team captain (3 years)" for accurate chancing.`;
+        return null;
+      }
+      case "awards": {
+        if (!v) return null;
+        const bad = new Set(["idk","idc","none","nothing","no","nope","nah","na","n/a","no awards","no idea","not sure","don't know","dont know","some","a few","many","lots","various","stuff"]);
+        if (bad.has(v.toLowerCase())) return "List specific award names, or leave blank (e.g. 'National Merit Semifinalist').";
+        if (isGibberish(v.replace(/\s+/g,""))) return "Please enter real award names, or leave blank.";
+        if (v.length < 3) return "Describe at least one award, or leave blank.";
+        return null;
+      }
+      case "apCourses": {
+        if (!v) return null;
+        if (isGibberish(v.replace(/\s+/g,""))) return "Enter a number or list like '6 AP courses' or 'AP Calc, AP Bio'.";
+        const num = parseInt(v.replace(/[^0-9]/g,""));
+        if (!isNaN(num) && num > 35) return "That's an unusually high number. Double-check.";
+        return null;
+      }
+      case "major": {
+        if (!v) return null;
+        if (/^\d+$/.test(v)) return "Enter a major name (e.g. 'Computer Science').";
+        if (isGibberish(v.replace(/\s+/g,""))) return "Enter a real major (e.g. 'Computer Science', 'Pre-med').";
+        return null;
+      }
+      case "state": {
+        if (!v) return null;
+        if (/^\d+$/.test(v)) return "Enter your state name, not a number.";
+        if (isGibberish(v)) return "Enter a valid state or country (e.g. 'California').";
+        return null;
+      }
+      default: return null;
+    }
+  }
+
+  function handleProfileChange(field: keyof StudentProfile, value: string | boolean) {
+    updateProfile(field, value);
+    if (typeof value === "string") {
+      const err = validateField(field, value);
+      setFormErrors(prev => ({ ...prev, [field]: err || "" }));
+    }
+  }
+
+  async function chanceSchool(school: string) {
+    if (!school.trim() || loading) return;
+
+    // Validate school name
+    if (isGibberish(school.replace(/\s+/g,""))) {
+      setFormErrors(prev => ({ ...prev, school: `"${school}" doesn't look like a real college. Try "MIT" or "UCLA".` }));
+      return;
+    }
+    const notColleges = ["google","apple","amazon","netflix","facebook","meta","tesla","nasa","spacex"];
+    if (notColleges.includes(school.toLowerCase())) {
+      setFormErrors(prev => ({ ...prev, school: `"${school}" is a company, not a college.` }));
+      return;
+    }
+    setFormErrors(prev => ({ ...prev, school: "" }));
+
+    // Validate required fields before calling API
+    const gpaErr = validateField("gpa", studentProfile.gpa);
+    if (gpaErr) {
+      setFormErrors(prev => ({ ...prev, gpa: gpaErr }));
+      setProfileStep("academics");
+      return;
+    }
+
+    // Validate optional fields that have values
+    const fieldsToCheck: (keyof typeof studentProfile)[] = ["sat","act","apCourses","extracurriculars","awards","major","state"];
+    const newErrors: Record<string, string> = {};
+    let hasError = false;
+    for (const field of fieldsToCheck) {
+      const v = studentProfile[field];
+      if (typeof v === "string" && v.trim()) {
+        const err = validateField(field, v);
+        if (err) { newErrors[field] = err; hasError = true; }
+      }
+    }
+    if (hasError) {
+      setFormErrors(prev => ({ ...prev, ...newErrors }));
+      // Switch to the tab containing the first error
+      if (newErrors.sat || newErrors.act || newErrors.apCourses) setProfileStep("academics");
+      else if (newErrors.extracurriculars || newErrors.awards) setProfileStep("profile");
+      else if (newErrors.major || newErrors.state) setProfileStep("context");
+      return;
+    }
+
+    setLoading(school);
+    try {
+      const res = await fetch("/api/chancer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ school, ...studentProfile }),
+      });
+      const data: ChanceResult & { error?: string; validationErrors?: string[] } = await res.json();
+
+      if (data.error) {
+        setResults(prev => ({ ...prev, [school]: { ...data, _error: data.error } as ChanceResult }));
+        if (!checkedSchools.includes(school)) setCheckedSchools(prev => [...prev, school]);
+        setLoading(null);
+        return;
+      }
+
+      setResults(prev => ({ ...prev, [school]: data }));
+      if (!checkedSchools.includes(school)) setCheckedSchools(prev => [...prev, school]);
+
+      // Update college list
+      const { data: existing } = await supabase.from("user_colleges").select("id").eq("user_id", userId).eq("college_name", school).single();
+      if (existing) {
+        await supabase.from("user_colleges").update({ chance: data.chance }).eq("id", existing.id);
+        setColleges(prev => prev.map(c => c.college_name === school ? { ...c, chance: data.chance } : c));
+      } else {
+        const { data: newEntry } = await supabase.from("user_colleges").insert({ user_id: userId, college_name: school, status: "tracking", chance: data.chance }).select().single();
+        if (newEntry) setColleges(prev => [...prev, newEntry]);
+      }
+    } catch (e) {
+      console.error(e);
+      setResults(prev => ({ ...prev, [school]: { _error: "Network error. Please try again." } as unknown as ChanceResult }));
+      if (!checkedSchools.includes(school)) setCheckedSchools(prev => [...prev, school]);
+    }
+    setLoading(null);
+  }
+
+  const schools = schoolInput.split(",").map(s => s.trim()).filter(Boolean);
+
+  const tabStyle = (active: boolean) => ({
+    padding: "8px 18px", border: "none", borderRadius: 100, fontSize: 12, fontWeight: 700, cursor: "pointer" as const, fontFamily: "inherit",
+    background: active ? "linear-gradient(135deg,#FF6B6B,#FF8E53)" : "rgba(255,255,255,0.06)",
+    color: active ? "#fff" : "rgba(255,255,255,0.45)",
+  });
+
+  const fieldStyle = (field: string) => ({
+    width: "100%", padding: "10px 14px", borderRadius: 12, color: "#fff", fontSize: 14, outline: "none", fontFamily: "inherit", boxSizing: "border-box" as const,
+    background: formErrors[field] ? "rgba(255,107,107,0.06)" : "rgba(255,255,255,0.06)",
+    border: `1px solid ${formErrors[field] ? "rgba(255,107,107,0.5)" : "rgba(255,255,255,0.1)"}`,
+    transition: "border-color 0.2s",
+  });
+
+  const inputStyle = { width: "100%", padding: "10px 14px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "#fff", fontSize: 14, outline: "none", fontFamily: "inherit", boxSizing: "border-box" as const };
+
+  const FieldErr = ({ field }: { field: string }) => formErrors[field] ? (
+    <div style={{ marginTop: 5, fontSize: 12, color: "#FF9090", display: "flex", alignItems: "flex-start", gap: 5 }}>
+      <span>⚠️</span> {formErrors[field]}
+    </div>
+  ) : null;
+
+  const fieldLabel = (text: string) => <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.45)", marginBottom: 6 }}>{text}</label>;
 
   return (
-    <div style={{ display: "flex", gap: 24 }}>
-      <Card style={{ width: 320 }}>
-        <div style={s.cardTitle}>Your Stats</div>
-        {[
-          { label: "GPA (Weighted)", val: localGpa, set: setLocalGpa, placeholder: "3.92" },
-          { label: "SAT Score", val: localSat, set: setLocalSat, placeholder: "1490" },
-          { label: "Class Rank", val: "", set: () => {}, placeholder: "Top 5%" },
-          { label: "AP/IB Courses", val: "", set: () => {}, placeholder: "8" },
-        ].map((field) => (
-          <div key={field.label} style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>{field.label}</label>
-            <input value={field.val} onChange={(e) => field.set(e.target.value)} placeholder={field.placeholder}
-              style={{ width: "100%", padding: "12px 16px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "#fff", fontSize: 15, outline: "none", fontFamily: "inherit", boxSizing: "border-box" as const }} />
+    <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+      {/* Profile panel */}
+      <div style={{ width: 360, flexShrink: 0, display: "flex", flexDirection: "column" as const, gap: 16 }}>
+        <Card>
+          <div style={s.cardTitle}>🎯 Your Profile</div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+            {(["academics", "profile", "context"] as const).map(step => (
+              <motion.button key={step} whileHover={{ scale: 1.04 }} onClick={() => setProfileStep(step)} style={tabStyle(profileStep === step)}>
+                {step === "academics" ? "📚 Academics" : step === "profile" ? "🏆 Activities" : "💡 Context"}
+              </motion.button>
+            ))}
           </div>
-        ))}
-        <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }} onClick={() => { setUpdated(true); setTimeout(() => setUpdated(false), 2000); }}
-          style={{ width: "100%", padding: "14px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 14, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-          {updated ? "✅ Updated!" : "📊 Update Chances"}
-        </motion.button>
-      </Card>
-      <Card style={{ flex: 1 }}>
-        <div style={s.cardTitle}>Admission Chances</div>
-        <div style={{ display: "flex", flexDirection: "column" as const, gap: 20 }}>
-          {chances.map((col, i) => {
-            const label = getLabel(col.chance);
-            return (
-              <motion.div key={col.name} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.06 }}
-                style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 16px", background: "rgba(255,255,255,0.03)", borderRadius: 14 }}>
-                <div style={{ fontSize: 28 }}>{col.emoji}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                    <span style={{ fontWeight: 700 }}>{col.name}</span>
-                    <span style={{ fontSize: 12, color: label.color }}>{label.text}</span>
+
+          {profileStep === "academics" && (
+            <div style={{ display: "flex", flexDirection: "column" as const, gap: 14 }}>
+              <div>
+                {fieldLabel("GPA")}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input value={studentProfile.gpa} onChange={e => handleProfileChange("gpa", e.target.value)} placeholder="e.g. 3.9" style={{ ...fieldStyle("gpa"), flex: 1 }} />
+                  <select value={studentProfile.gpaType} onChange={e => updateProfile("gpaType", e.target.value)} style={{ ...inputStyle, width: "auto", appearance: "none" as const }}>
+                    <option value="weighted">W</option>
+                    <option value="unweighted">UW</option>
+                  </select>
+                </div>
+                <FieldErr field="gpa" />
+              </div>
+              <div>
+                {fieldLabel("GPA Scale")}
+                <select value={studentProfile.gpaScale} onChange={e => updateProfile("gpaScale", e.target.value)} style={{ ...inputStyle, appearance: "none" as const }}>
+                  {GPA_SCALES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+                {normalizedGpa && (
+                  <div style={{ marginTop: 6, padding: "6px 12px", background: "rgba(78,205,196,0.1)", borderRadius: 8, fontSize: 12, color: "#4ECDC4" }}>
+                    ✓ Normalized to 4.0 scale: <strong>{normalizedGpa}</strong>
                   </div>
-                  <div style={{ height: 8, background: "rgba(255,255,255,0.08)", borderRadius: 100, overflow: "hidden" }}>
-                    <motion.div animate={{ width: `${Math.round(col.chance)}%` }} transition={{ duration: 0.6 }} style={{ height: "100%", borderRadius: 100, background: col.color }} />
+                )}
+              </div>
+              <div>
+                {fieldLabel("SAT Score")}
+                <input value={studentProfile.sat} onChange={e => handleProfileChange("sat", e.target.value)} placeholder="e.g. 1480 (leave blank if not taken)" style={fieldStyle("sat")} />
+                <FieldErr field="sat" />
+              </div>
+              <div>
+                {fieldLabel("ACT Score")}
+                <input value={studentProfile.act} onChange={e => handleProfileChange("act", e.target.value)} placeholder="e.g. 33 (leave blank if not taken)" style={fieldStyle("act")} />
+                <FieldErr field="act" />
+              </div>
+              <div>
+                {fieldLabel("AP/IB Courses Taken")}
+                <input value={studentProfile.apCourses} onChange={e => handleProfileChange("apCourses", e.target.value)} placeholder="e.g. 6 AP courses" style={fieldStyle("apCourses")} />
+                <FieldErr field="apCourses" />
+              </div>
+              <div>
+                {fieldLabel("Class Rank")}
+                <select value={studentProfile.classRank} onChange={e => updateProfile("classRank", e.target.value)} style={{ ...inputStyle, appearance: "none" as const }}>
+                  <option value="">Unknown / Not ranked</option>
+                  <option value="Top 1%">Top 1%</option>
+                  <option value="Top 5%">Top 5%</option>
+                  <option value="Top 10%">Top 10%</option>
+                  <option value="Top 25%">Top 25%</option>
+                  <option value="Top 50%">Top 50%</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {profileStep === "profile" && (
+            <div style={{ display: "flex", flexDirection: "column" as const, gap: 14 }}>
+              <div>
+                {fieldLabel("Extracurricular Activities")}
+                <textarea value={studentProfile.extracurriculars} onChange={e => handleProfileChange("extracurriculars", e.target.value)} placeholder="e.g. Debate team (4 years), Math club founder, Hospital volunteer (200+ hours)..." style={{ ...fieldStyle("extracurriculars"), height: 90, resize: "vertical" as const }} />
+                <FieldErr field="extracurriculars" />
+              </div>
+              <div>
+                {fieldLabel("Leadership Roles")}
+                <textarea value={studentProfile.leadershipRoles} onChange={e => updateProfile("leadershipRoles", e.target.value)} placeholder="e.g. Student council president, Debate team captain..." style={{ ...inputStyle, height: 70, resize: "vertical" as const }} />
+              </div>
+              <div>
+                {fieldLabel("Awards & Honors")}
+                <textarea value={studentProfile.awards} onChange={e => handleProfileChange("awards", e.target.value)} placeholder="e.g. National Merit Semifinalist, Regional Science Fair 1st, USAMO qualifier..." style={{ ...fieldStyle("awards"), height: 70, resize: "vertical" as const }} />
+                <FieldErr field="awards" />
+              </div>
+              <div>
+                {fieldLabel("Athletics Level")}
+                <select value={studentProfile.sportsLevel} onChange={e => updateProfile("sportsLevel", e.target.value)} style={{ ...inputStyle, appearance: "none" as const }}>
+                  <option value="None">None</option>
+                  <option value="JV/Club">JV or Club</option>
+                  <option value="Varsity">Varsity</option>
+                  <option value="State level">State Level</option>
+                  <option value="National/Olympic">National / Olympic</option>
+                </select>
+              </div>
+              <div>
+                {fieldLabel("Letters of Recommendation")}
+                <select value={studentProfile.recLetterStrength} onChange={e => updateProfile("recLetterStrength", e.target.value)} style={{ ...inputStyle, appearance: "none" as const }}>
+                  <option value="Strong">📬 Strong — recommender knows me very well</option>
+                  <option value="Good">✉️ Good — solid, positive letters expected</option>
+                  <option value="Average">📄 Average — standard letters</option>
+                  <option value="Unknown">❓ Not sure / Haven&apos;t asked yet</option>
+                </select>
+              </div>
+              <div>
+                {fieldLabel("Essay Strength (self-assess)")}
+                <select value={studentProfile.essayStrength} onChange={e => updateProfile("essayStrength", e.target.value)} style={{ ...inputStyle, appearance: "none" as const }}>
+                  <option value="Strong">Strong — compelling, unique story</option>
+                  <option value="Average">Average — solid but not standout</option>
+                  <option value="Weak">Weak — needs improvement</option>
+                  <option value="Unknown">Unknown / Not written yet</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {profileStep === "context" && (
+            <div style={{ display: "flex", flexDirection: "column" as const, gap: 14 }}>
+              <div>
+                {fieldLabel("Intended Major")}
+                <input value={studentProfile.major} onChange={e => handleProfileChange("major", e.target.value)} placeholder="e.g. Computer Science, Pre-med, Undecided" style={fieldStyle("major")} />
+                <FieldErr field="major" />
+              </div>
+              <div>
+                {fieldLabel("State of Residence")}
+                <input value={studentProfile.state} onChange={e => handleProfileChange("state", e.target.value)} placeholder="e.g. California (matters for state schools)" style={fieldStyle("state")} />
+                <FieldErr field="state" />
+              </div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "rgba(255,255,255,0.65)" }}>
+                  <div onClick={() => updateProfile("firstGen", !studentProfile.firstGen)} style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${studentProfile.firstGen ? "#4ECDC4" : "rgba(255,255,255,0.2)"}`, background: studentProfile.firstGen ? "#4ECDC4" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                    {studentProfile.firstGen && <span style={{ fontSize: 11, color: "#000" }}>✓</span>}
+                  </div>
+                  First-gen college student
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "rgba(255,255,255,0.65)" }}>
+                  <div onClick={() => updateProfile("legacy", !studentProfile.legacy)} style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${studentProfile.legacy ? "#FFEAA7" : "rgba(255,255,255,0.2)"}`, background: studentProfile.legacy ? "#FFEAA7" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                    {studentProfile.legacy && <span style={{ fontSize: 11, color: "#000" }}>✓</span>}
+                  </div>
+                  Legacy applicant
+                </label>
+              </div>
+              <div style={{ padding: 14, background: "rgba(255,107,107,0.06)", borderRadius: 12, fontSize: 12, color: "rgba(255,255,255,0.4)", lineHeight: 1.7 }}>
+                💡 <strong style={{ color: "#FF6B6B" }}>GPA Note:</strong> Your GPA will be automatically normalized to the 4.0 scale used by US colleges for fair comparison, regardless of your school&apos;s grading system.
+              </div>
+            </div>
+          )}
+        </Card>
+
+        {/* Schools input */}
+        <Card>
+          <div style={s.cardTitle}>Schools to Check</div>
+          <textarea value={schoolInput} onChange={e => { setSchoolInput(e.target.value); setFormErrors(prev => ({ ...prev, school: "" })); }} placeholder="MIT, Stanford, UCLA, UMich..." style={{ ...inputStyle, height: 80, resize: "vertical" as const, marginBottom: formErrors.school ? 6 : 12 }} />
+          {formErrors.school && (
+            <div style={{ marginBottom: 10, padding: "8px 12px", background: "rgba(255,107,107,0.1)", border: "1px solid rgba(255,107,107,0.3)", borderRadius: 10, fontSize: 12, color: "#FF9090", display: "flex", gap: 6, alignItems: "flex-start" }}>
+              <span>⚠️</span>{formErrors.school}
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column" as const, gap: 6 }}>
+            {schools.map(school => (
+              <motion.button key={school} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => chanceSchool(school)} disabled={!!loading}
+                style={{ width: "100%", padding: "11px", background: loading === school ? "rgba(255,255,255,0.07)" : "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 12, color: "#fff", fontSize: 13, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+                {loading === school ? `🔍 Researching ${school}...` : `📊 Chance Me — ${school}`}
+              </motion.button>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      {/* Results */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" as const, gap: 16 }}>
+        {checkedSchools.length === 0 ? (
+          <Card style={{ textAlign: "center", padding: 60 }}>
+            <div style={{ fontSize: 52, marginBottom: 16 }}>🎯</div>
+            <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>Real-Time Admission Chances</div>
+            <div style={{ fontSize: 15, color: "rgba(255,255,255,0.4)", maxWidth: 400, margin: "0 auto", lineHeight: 1.8 }}>
+              Fill in your full profile on the left — academics, activities, and context. The more you share, the more accurate your chances will be.
+            </div>
+            <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 32 }}>
+              {["📚 Academics", "🏆 Activities", "💡 Context"].map((item, i) => (
+                <div key={i} style={{ textAlign: "center", padding: "16px 20px", background: "rgba(255,255,255,0.03)", borderRadius: 16, border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <div style={{ fontSize: 24, marginBottom: 6 }}>{item.split(" ")[0]}</div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{item.split(" ")[1]}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        ) : checkedSchools.map(school => {
+          const r = results[school];
+          if (!r) return null;
+          const rAny = r as unknown as { _error?: string };
+          if (rAny._error) {
+            return (
+              <motion.div key={school} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+                style={{ padding: 24, background: "rgba(255,107,107,0.06)", border: "1px solid rgba(255,107,107,0.25)", borderRadius: 20 }}>
+                <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 12 }}>{school}</div>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12, lineHeight: 1.6 }}>
+                  <span style={{ fontSize: 24, flexShrink: 0 }}>⚠️</span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#FF9090", marginBottom: 4 }}>Couldn’t calculate chances</div>
+                    <div style={{ fontSize: 14, color: "rgba(255,255,255,0.45)" }}>{rAny._error}</div>
+                    <div style={{ marginTop: 10, fontSize: 13, color: "rgba(255,255,255,0.25)" }}>Fix the issue in your profile and try again.</div>
                   </div>
                 </div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: col.color, minWidth: 60, textAlign: "right" as const }}>{Math.round(col.chance)}%</div>
               </motion.div>
             );
-          })}
-        </div>
-      </Card>
+          }
+          const lbl = r.chance < 15 ? { text: "Reach", color: "#FF6B6B", bg: "rgba(255,107,107,0.12)" }
+            : r.chance < 35 ? { text: "Hard Target", color: "#FF8E53", bg: "rgba(255,142,83,0.12)" }
+            : r.chance < 60 ? { text: "Target", color: "#FFEAA7", bg: "rgba(255,234,167,0.12)" }
+            : { text: "Safety", color: "#96CEB4", bg: "rgba(150,206,180,0.12)" };
+
+          return (
+            <motion.div key={school} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ padding: 28, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 22, borderTop: `3px solid ${lbl.color}` }}>
+              {/* Header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+                <div>
+                  <h3 style={{ fontSize: 24, fontWeight: 900, marginBottom: 8 }}>{school}</h3>
+                  <span style={{ padding: "5px 14px", borderRadius: 100, fontSize: 13, fontWeight: 700, background: lbl.bg, color: lbl.color }}>{lbl.text}</span>
+                </div>
+                <div style={{ textAlign: "right" as const }}>
+                  <div style={{ fontSize: 60, fontWeight: 900, color: lbl.color, lineHeight: 1 }}>{Math.round(r.chance)}%</div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>admission chance</div>
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              <div style={{ height: 8, background: "rgba(255,255,255,0.07)", borderRadius: 100, overflow: "hidden", marginBottom: 24 }}>
+                <motion.div animate={{ width: `${Math.round(r.chance)}%` }} transition={{ duration: 1, ease: "easeOut" }} style={{ height: "100%", borderRadius: 100, background: `linear-gradient(135deg, ${lbl.color}, #4ECDC4)` }} />
+              </div>
+
+              {/* School stats */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 20 }}>
+                {[{ label: "Acceptance Rate", val: r.acceptanceRate || "—" }, { label: "Avg GPA", val: r.avgGPA || "—" }, { label: "Avg SAT", val: r.avgSAT || "—" }, { label: "Avg ACT", val: r.avgACT || "—" }].map(stat => (
+                  <div key={stat.label} style={{ padding: "12px 10px", background: "rgba(255,255,255,0.04)", borderRadius: 12, textAlign: "center" as const }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>{stat.val}</div>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{stat.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Rating bars */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+                {[{ label: "Academic Rating", val: r.academicRating, color: "#4ECDC4" }, { label: "EC Rating", val: r.ecRating, color: "#FFEAA7" }, { label: "Overall Rating", val: r.overallRating, color: "#FF6B6B" }].map(rating => (
+                  <div key={rating.label} style={{ padding: "12px 14px", background: "rgba(255,255,255,0.04)", borderRadius: 14 }}>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>{rating.label}</div>
+                    <div style={{ height: 4, background: "rgba(255,255,255,0.07)", borderRadius: 100, marginBottom: 6, overflow: "hidden" }}>
+                      <motion.div animate={{ width: `${(rating.val / 10) * 100}%` }} transition={{ duration: 0.8, delay: 0.2 }} style={{ height: "100%", background: rating.color, borderRadius: 100 }} />
+                    </div>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: rating.color }}>{rating.val}<span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>/10</span></div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Strengths & weaknesses */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: r.tip ? 16 : 0 }}>
+                {r.strengths?.length > 0 && (
+                  <div style={{ padding: "14px 16px", background: "rgba(150,206,180,0.07)", borderRadius: 14, border: "1px solid rgba(150,206,180,0.15)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#96CEB4", marginBottom: 10 }}>✅ STRENGTHS</div>
+                    {r.strengths.map((s, i) => <div key={i} style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginBottom: 4, lineHeight: 1.5 }}>• {s}</div>)}
+                  </div>
+                )}
+                {r.weaknesses?.length > 0 && (
+                  <div style={{ padding: "14px 16px", background: "rgba(255,107,107,0.06)", borderRadius: 14, border: "1px solid rgba(255,107,107,0.15)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#FF6B6B", marginBottom: 10 }}>⚠️ AREAS TO IMPROVE</div>
+                    {r.weaknesses.map((w, i) => <div key={i} style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginBottom: 4, lineHeight: 1.5 }}>• {w}</div>)}
+                  </div>
+                )}
+              </div>
+
+              {r.tip && <div style={{ padding: "14px 16px", background: "rgba(78,205,196,0.07)", borderRadius: 14, border: "1px solid rgba(78,205,196,0.15)", fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.7 }}>💡 <strong style={{ color: "#4ECDC4" }}>Counselor Tip:</strong> {r.tip}</div>}
+            </motion.div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// ─── SHARED COMPONENTS ───────────────────────────────────────────────────────
+// ─── SHARED ───────────────────────────────────────────────────────────────────
 
 function Card({ children, style = {} }: { children: ReactNode; style?: React.CSSProperties }) {
-  return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ ...s.card, ...style }}>
-      {children}
-    </motion.div>
-  );
-}
-
-function StatCard({ label, val, icon, color }: { label: string; val: string; icon: string; color: string }) {
-  return (
-    <Card style={{ textAlign: "center" }}>
-      <div style={{ fontSize: 32, marginBottom: 8 }}>{icon}</div>
-      <div style={{ fontSize: 36, fontWeight: 900, color, marginBottom: 4 }}>{val}</div>
-      <div style={{ fontSize: 14, color: "rgba(255,255,255,0.4)" }}>{label}</div>
-    </Card>
-  );
+  return <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} style={{ ...s.card, ...style }}>{children}</motion.div>;
 }
 
 function StatPill({ label, val, color }: { label: string; val: string; color: string }) {
-  return (
-    <div style={{ textAlign: "center", padding: "12px 20px", background: "rgba(255,255,255,0.05)", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)" }}>
-      <div style={{ fontSize: 22, fontWeight: 900, color }}>{val}</div>
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{label}</div>
-    </div>
-  );
+  return <div style={{ textAlign: "center", padding: "10px 18px", background: "rgba(255,255,255,0.04)", borderRadius: 14, border: "1px solid rgba(255,255,255,0.07)" }}><div style={{ fontSize: 20, fontWeight: 900, color }}>{val}</div><div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>{label}</div></div>;
 }
-
-function TaskRow({ task, onToggle }: { task: Task; onToggle: () => void }) {
-  return (
-    <motion.div whileHover={{ x: 3 }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.04)", cursor: "pointer", opacity: task.done ? 0.5 : 1 }}>
-      <motion.div whileTap={{ scale: 0.8 }} onClick={onToggle}
-        style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${task.done ? "#4ECDC4" : "rgba(255,255,255,0.2)"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer", background: task.done ? "#4ECDC4" : "transparent" }}>
-        {task.done && <span style={{ fontSize: 10, color: "#000" }}>✓</span>}
-      </motion.div>
-      <span style={{ flex: 1, fontSize: 14, textDecoration: task.done ? "line-through" : "none", color: task.done ? "rgba(255,255,255,0.3)" : "#fff" }}>{task.text}</span>
-      <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: task.priority === "high" ? "#FF6B6B" : task.priority === "medium" ? "#FFEAA7" : "#96CEB4" }} />
-      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", whiteSpace: "nowrap" }}>{task.due}</span>
-    </motion.div>
-  );
-}
-
-// ─── STYLES ──────────────────────────────────────────────────────────────────
 
 const s: StyleMap = {
-  root: { display: "flex", minHeight: "100vh", background: "#0A0A0F", color: "#fff", fontFamily: "'Syne', system-ui, sans-serif", overflow: "hidden" },
-  sidebar: { width: 220, background: "rgba(255,255,255,0.02)", borderRight: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" },
-  sidebarLogo: { display: "flex", alignItems: "center", gap: 10, padding: "24px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" },
-  sidebarLogoText: { fontSize: 20, fontWeight: 800, background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
-  sidebarBtn: { display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "12px 20px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left", transition: "all 0.2s", fontFamily: "inherit" },
-  sidebarProfile: { display: "flex", alignItems: "center", gap: 12, padding: "20px", borderTop: "1px solid rgba(255,255,255,0.06)" },
-  avatar: { width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14 },
-  main: { flex: 1, overflow: "auto", display: "flex", flexDirection: "column" },
-  topbar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "24px 32px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(10,10,15,0.8)", backdropFilter: "blur(20px)", position: "sticky", top: 0, zIndex: 50 },
-  streakBadge: { padding: "8px 16px", background: "rgba(255,107,107,0.1)", border: "1px solid rgba(255,107,107,0.2)", borderRadius: 100, fontSize: 13, fontWeight: 600, color: "#FF6B6B" },
-  avatarSm: { width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, cursor: "pointer" },
-  homeGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20 },
-  card: { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 20, padding: 24 },
-  cardTitle: { fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.7)", marginBottom: 20, letterSpacing: "0.02em" },
-  taskInput: { flex: 1, padding: "10px 14px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, color: "#fff", fontSize: 14, outline: "none", fontFamily: "inherit" },
-  addBtn: { padding: "10px 16px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 12, color: "#fff", fontSize: 20, fontWeight: 700, cursor: "pointer" },
-  applyBtn: { width: "100%", padding: "12px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 12, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
+  root: { display: "flex", minHeight: "100vh", background: "#0A0A0F", color: "#fff", fontFamily: "'Syne', system-ui, sans-serif" },
+  sidebar: { width: 210, background: "rgba(255,255,255,0.015)", borderRight: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh", flexShrink: 0 },
+  sidebarLogo: { display: "flex", alignItems: "center", gap: 10, padding: "20px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)" },
+  sidebarLogoText: { fontSize: 18, fontWeight: 900, background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
+  sidebarBtn: { display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "11px 16px", border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit", transition: "all 0.15s" },
+  sidebarProfile: { display: "flex", alignItems: "center", gap: 10, padding: "16px", borderTop: "1px solid rgba(255,255,255,0.06)" },
+  avatar: { width: 34, height: 34, borderRadius: "50%", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, flexShrink: 0 },
+  main: { flex: 1, overflow: "auto", display: "flex", flexDirection: "column", minWidth: 0 },
+  topbar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 28px", borderBottom: "1px solid rgba(255,255,255,0.05)", background: "rgba(10,10,15,0.85)", backdropFilter: "blur(24px)", position: "sticky", top: 0, zIndex: 50 },
+  streakBadge: { padding: "7px 14px", background: "rgba(255,107,107,0.1)", border: "1px solid rgba(255,107,107,0.2)", borderRadius: 100, fontSize: 12, fontWeight: 700, color: "#FF6B6B" },
+  avatarSm: { width: 34, height: 34, borderRadius: "50%", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, cursor: "pointer" },
+  homeGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 18 },
+  card: { background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 18, padding: 22 },
+  cardTitle: { fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.6)", marginBottom: 16, letterSpacing: "0.03em" },
+  taskInput: { flex: 1, padding: "10px 14px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 12, color: "#fff", fontSize: 14, outline: "none", fontFamily: "inherit" },
+  addBtn: { padding: "10px 16px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 12, color: "#fff", fontSize: 20, fontWeight: 700, cursor: "pointer", flexShrink: 0 },
+  applyBtn: { padding: "11px", background: "linear-gradient(135deg,#FF6B6B,#FF8E53)", border: "none", borderRadius: 12, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" },
 };
